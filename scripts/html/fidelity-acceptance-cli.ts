@@ -13,7 +13,9 @@ import {
   compareCatalogFontFaces,
   compareChromiumFontInstancesToLayoutRuns,
 } from "./catalog-font-equivalence";
+import { catalogStage90RejectionDiagnostics } from "./catalog-stage90-rejection-diagnostics";
 import { readChromiumFontBinding } from "./chromium-font-binding";
+import { assertChromeObserverFontFaceBindings } from "./chromium-observer-font-pins";
 import { runDynamicFidelity, stableJson } from "./dynamic-fidelity";
 import { type JsonValue, jsonRecords } from "./dynamic-state";
 import { assertFeatureResultReportsComplete, loadFeatureCatalog } from "./feature-catalog";
@@ -30,6 +32,7 @@ import {
   type CatalogStage90ChromeExecutablePin,
   type CatalogStage90ResumeOptions,
   jsonResourceFiles,
+  jsonSelectedFonts,
   runCatalogStage90Captures,
   runCatalogStage90DiagnosticCaptures,
   runInputStateFidelity,
@@ -436,7 +439,7 @@ async function runCatalogDiagnosticCapture(plan: CatalogDiagnosticCapturePlan): 
   const binaryProof = freezeCatalogBinary(plan.buildReport, path.resolve(plan.output));
   const binary = path.join(path.dirname(binaryProof.path), "runtime-tests");
   const currentBuild = currentCatalogBuild(plan.buildReport);
-  await runCatalogStage90DiagnosticCaptures(
+  const finalized = await runCatalogStage90DiagnosticCaptures(
     binary,
     plan.conditionPlan,
     plan.output,
@@ -444,6 +447,43 @@ async function runCatalogDiagnosticCapture(plan: CatalogDiagnosticCapturePlan): 
     plan.chromeExecutable,
     binaryProof,
     currentBuild,
+  );
+  reportCatalogDiagnosticFontChecks(finalized, plan.diagnosticConditions);
+}
+
+function reportCatalogDiagnosticFontChecks(
+  finalized: JsonValue,
+  testedConditionIds: string[],
+): void {
+  const manifest = jsonRecord(finalized, "diagnostic capture manifest");
+  const captures = jsonRecords(manifest.conditions, "diagnostic capture conditions");
+  const probe = validateCatalogFontProbe(manifest);
+  const indexed = indexFontIdentityConditions(captures, probe);
+  const validated = testedConditionIds.map((conditionId) => {
+    const capture = indexed.captures.get(conditionId);
+    const request = indexed.requests.get(conditionId);
+    const response = indexed.responses.get(conditionId);
+    if (!capture || !request || !response)
+      throw new Error("Diagnostic font evidence is incomplete");
+    if (capture.status !== "captured") return capture;
+    const reason = validateFontIdentityCondition(conditionId, capture, request, response, probe);
+    return reason === null
+      ? capture
+      : {
+          ...capture,
+          status: "unverified",
+          fontIdentityFailureStage: "font-reconciliation-provenance",
+          fontIdentityUnknownReasons: [reason],
+        };
+  });
+  const rejections = catalogStage90RejectionDiagnostics(testedConditionIds, validated);
+  console.info(
+    JSON.stringify({
+      ...rejections,
+      profile: "selected-conditions",
+      acceptance: false,
+      testedConditionIds,
+    }),
   );
 }
 
@@ -650,7 +690,12 @@ function validateFontIdentityCondition(
 ): string | null {
   try {
     assertFontIdentityRequestBinding(conditionId, capture, requestCapture, responseCapture, probe);
-    const reason = compareFontIdentityReceipts(conditionId, capture, responseCapture);
+    const reason = compareFontIdentityReceipts(
+      conditionId,
+      capture,
+      requestCapture,
+      responseCapture,
+    );
     return reason;
   } catch (error) {
     return error instanceof Error ? error.message : "font identity is invalid";
@@ -692,6 +737,7 @@ function assertFontIdentityRequestBinding(
     !hasNoStringReasons(capture.fontIdentityUnknownReasons) ||
     !hasNoStringReasons(observation.unknownReasons) ||
     !sameJson(requestCapture.selectedFonts, observation.selectedFonts) ||
+    !sameJson(requestCapture.observerFaces ?? null, capture.observerFaces ?? null) ||
     !sameJson(
       requestCapture.resourceFiles,
       jsonResourceFiles(resources.requests) as unknown as JsonValue,
@@ -707,6 +753,7 @@ function assertFontIdentityRequestBinding(
 function compareFontIdentityReceipts(
   conditionId: string,
   capture: { [key: string]: JsonValue },
+  requestCapture: { [key: string]: JsonValue },
   responseCapture: { [key: string]: JsonValue },
 ): string | null {
   const krr = readPinnedJsonRecord(
@@ -728,27 +775,33 @@ function compareFontIdentityReceipts(
     !sameJson(chrome.fontProvenance, responseCapture.fontProvenance)
   )
     throw new Error("font identity response differs from the strict Chrome receipt");
-  const comparison =
+  const trace =
     chrome.traceBinding === undefined
-      ? compareCatalogFontFaces(krr.fontProvenance, chrome.fontProvenance)
-      : compareChromiumFontInstancesToLayoutRuns(
-          readChromiumFontBinding(chrome.traceBinding, {
-            conditionId,
-            sourceSha256: jsonText(capture.sourceSha256, "condition source SHA"),
-            viewport: z
-              .object({ width: z.number(), height: z.number(), scale: z.number() })
-              .strict()
-              .parse(chrome.viewport),
-            browserExecutablePath: jsonText(chrome.browserExecutablePath, "Chrome executable"),
-            browserExecutableSha256: jsonText(
-              chrome.browserExecutableSha256,
-              "Chrome executable SHA",
-            ),
-            capturePath: jsonText(chrome.capturePath, "Chrome capture"),
-            captureSha256: jsonText(chrome.captureSha256, "Chrome capture SHA"),
-          }).instances,
-          krr.fontProvenance,
-        );
+      ? undefined
+      : readChromiumFontBinding(chrome.traceBinding, {
+          conditionId,
+          sourceSha256: jsonText(capture.sourceSha256, "condition source SHA"),
+          viewport: z
+            .object({ width: z.number(), height: z.number(), scale: z.number() })
+            .strict()
+            .parse(chrome.viewport),
+          browserExecutablePath: jsonText(chrome.browserExecutablePath, "Chrome executable"),
+          browserExecutableSha256: jsonText(
+            chrome.browserExecutableSha256,
+            "Chrome executable SHA",
+          ),
+          capturePath: jsonText(chrome.capturePath, "Chrome capture"),
+          captureSha256: jsonText(chrome.captureSha256, "Chrome capture SHA"),
+        });
+  assertChromeObserverFontFaceBindings(
+    requestCapture.observerFaces,
+    jsonSelectedFonts(requestCapture.selectedFonts),
+    trace,
+    jsonRecords(responseCapture.fontProvenance, "response font provenance"),
+  );
+  const comparison = trace
+    ? compareChromiumFontInstancesToLayoutRuns(trace.instances, krr.fontProvenance)
+    : compareCatalogFontFaces(krr.fontProvenance, chrome.fontProvenance);
   return comparison.established
     ? null
     : (comparison.reason ?? "physical font equivalence is not established");

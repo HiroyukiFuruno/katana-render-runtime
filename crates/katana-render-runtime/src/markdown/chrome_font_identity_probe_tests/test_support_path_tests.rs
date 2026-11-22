@@ -102,6 +102,7 @@ fn request_with_resource(resource_path: std::path::PathBuf) -> ProbeRequest {
                 body_path: resource_path,
                 bytes_sha256: super::super::identity::sha256(b"font response"),
             }],
+            observer_faces: Vec::new(),
         }],
     }
 }

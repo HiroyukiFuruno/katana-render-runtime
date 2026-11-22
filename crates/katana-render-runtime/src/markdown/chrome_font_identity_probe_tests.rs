@@ -27,6 +27,8 @@ struct CaptureRequest {
     condition_id: String,
     selected_fonts: Vec<SelectedFont>,
     resource_files: Vec<ResourceFile>,
+    #[serde(default)]
+    observer_faces: Vec<ObserverFace>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -44,6 +46,15 @@ struct ResourceFile {
     url: String,
     body_path: PathBuf,
     bytes_sha256: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct ObserverFace {
+    post_script_name: String,
+    file_path: PathBuf,
+    file_sha256: String,
+    face_index: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

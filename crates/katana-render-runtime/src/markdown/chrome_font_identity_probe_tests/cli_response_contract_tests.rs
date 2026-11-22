@@ -33,6 +33,7 @@ fn response_fixture() -> Result<ProbeResponse, String> {
             condition_id: "response-schema".to_owned(),
             selected_fonts: Vec::new(),
             resource_files: Vec::new(),
+            observer_faces: Vec::new(),
         }],
     };
     let request_bytes = serde_json::to_vec(&request).map_err(|error| error.to_string())?;

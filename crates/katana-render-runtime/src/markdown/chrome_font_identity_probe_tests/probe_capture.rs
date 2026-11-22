@@ -1,6 +1,6 @@
 use super::super::ResourceFile;
 use super::super::identity::FontResolutionCache;
-use super::{CaptureRequest, CaptureResult, SelectedFont, resolve_selected_font};
+use super::{CaptureRequest, CaptureResult, ResolutionInputs, SelectedFont, resolve_selected_font};
 use resvg::usvg::fontdb::Database;
 
 pub(super) fn probe_capture(
@@ -16,9 +16,12 @@ pub(super) fn probe_capture(
     );
     resolve_capture_fonts(
         system_database,
-        &resource_database,
-        &capture.resource_files,
-        resource_error.as_deref(),
+        ResolutionInputs {
+            resource_database: &resource_database,
+            resources: &capture.resource_files,
+            resource_error: resource_error.as_deref(),
+            observer_faces: &capture.observer_faces,
+        },
         capture.selected_fonts,
         resolution_cache,
         &mut result,
@@ -61,9 +64,7 @@ fn initial_capture_result(
 
 fn resolve_capture_fonts(
     system_database: &Database,
-    resource_database: &Database,
-    resources: &[ResourceFile],
-    resource_error: Option<&str>,
+    inputs: ResolutionInputs<'_>,
     selected_fonts: Vec<SelectedFont>,
     resolution_cache: &mut FontResolutionCache<'_>,
     result: &mut CaptureResult,
@@ -71,9 +72,12 @@ fn resolve_capture_fonts(
     for selected in selected_fonts {
         resolve_selected_font(
             system_database,
-            resource_database,
-            resources,
-            resource_error,
+            ResolutionInputs {
+                resource_database: inputs.resource_database,
+                resources: inputs.resources,
+                resource_error: inputs.resource_error,
+                observer_faces: inputs.observer_faces,
+            },
             selected,
             resolution_cache,
             result,

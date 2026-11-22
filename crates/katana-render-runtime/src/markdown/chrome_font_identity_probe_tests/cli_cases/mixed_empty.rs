@@ -34,11 +34,13 @@ fn mixed_request(fixture: &CliFixture) -> ProbeRequest {
                     false,
                 )],
                 resource_files: vec![fixture.nonfont_resource.clone()],
+                observer_faces: Vec::new(),
             },
             CaptureRequest {
                 condition_id: "probe-mixed-empty-boundary".to_string(),
                 selected_fonts: Vec::new(),
                 resource_files: Vec::new(),
+                observer_faces: Vec::new(),
             },
         ],
     }

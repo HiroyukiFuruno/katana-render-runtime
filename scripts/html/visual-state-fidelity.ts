@@ -20,6 +20,11 @@ import {
   type FontReconciliationRejectionStage,
 } from "./catalog-stage90-rejection-diagnostics";
 import { withObserverBrowser } from "./chromium-font-capture";
+import {
+  type ChromeObserverFontFace,
+  parseChromeObserverFontFaces,
+  selectChromeObserverFontFaces,
+} from "./chromium-observer-font-pins";
 import { assertCoreTextPostScriptOrder, validateFontProvenance } from "./coretext-font-provenance";
 import { applyEventsInteraction } from "./dynamic-events";
 import {
@@ -90,6 +95,7 @@ interface ChromeFontIdentityCapture {
   conditionId: string;
   selectedFonts: ChromeSelectedFont[];
   resourceFiles: Array<Pick<ChromeResourceEntry, "url" | "bodyPath" | "bytesSha256">>;
+  observerFaces?: ChromeObserverFontFace[];
 }
 
 export interface CatalogStage90ResumeOptions {
@@ -130,6 +136,7 @@ export function createChromeFontIdentityRequest(
   )
     throw new Error("Chrome font identity request condition coverage differs from the plan");
   for (const capture of captures) {
+    const observerFaces = parseChromeObserverFontFaces(capture.observerFaces);
     if (
       capture.selectedFonts.some(
         (font) =>
@@ -143,6 +150,12 @@ export function createChromeFontIdentityRequest(
           resource.url.length === 0 ||
           !path.isAbsolute(resource.bodyPath) ||
           !/^[a-f0-9]{64}$/.test(resource.bytesSha256),
+      ) ||
+      observerFaces.some(
+        (face) =>
+          !capture.selectedFonts.some(
+            (font) => !font.isCustomFont && font.postScriptName === face.postScriptName,
+          ),
       )
     )
       throw new Error(
@@ -158,7 +171,7 @@ function jsonRecord(value: JsonValue | undefined, label: string): Record<string,
   return value;
 }
 
-function jsonSelectedFonts(value: JsonValue | undefined): ChromeSelectedFont[] {
+export function jsonSelectedFonts(value: JsonValue | undefined): ChromeSelectedFont[] {
   if (!Array.isArray(value)) throw new Error("Chrome font identity observations are missing");
   return value.map((font) => {
     const row = jsonRecord(font, "Chrome selected font");
@@ -756,20 +769,6 @@ export async function runCatalogStage90DiagnosticCaptures(
     path.join(outputDirectory, "catalog-stage90-diagnostic-captures.json"),
     diagnosticConditions,
   );
-  const conditions = jsonArray(
-    jsonRecord(finalized, "final catalog stage90 diagnostic manifest").conditions,
-    "final catalog stage90 diagnostic conditions",
-  );
-  const testedConditionIds = capture.plan.conditions.map((condition) => condition.conditionId);
-  const rejections = catalogStage90RejectionDiagnostics(testedConditionIds, conditions);
-  console.info(
-    JSON.stringify({
-      ...rejections,
-      profile: "selected-conditions",
-      acceptance: false,
-      testedConditionIds,
-    }),
-  );
   return finalized;
 }
 
@@ -1171,6 +1170,7 @@ function assertReusableRowsMatch(
     "krrReportSha256",
     "resourceProvenance",
     "fontIdentityObservation",
+    "observerFaces",
   ])
     if (!sameJson(finalized[key] ?? null, observation[key] ?? null))
       throw new Error(`prior observation differs from finalized row: ${conditionId}`);
@@ -1453,10 +1453,12 @@ function catalogFontIdentityCapture(
 ): ChromeFontIdentityCapture {
   const observation = jsonRecord(row.fontIdentityObservation, "prior font observation");
   const resources = jsonRecord(row.resourceProvenance, "prior resource provenance");
+  const observerFaces = parseChromeObserverFontFaces(row.observerFaces);
   return {
     conditionId,
     selectedFonts: jsonSelectedFonts(observation.selectedFonts),
     resourceFiles: jsonResourceFiles(resources.requests),
+    ...(observerFaces.length > 0 && { observerFaces }),
   };
 }
 
@@ -1679,10 +1681,12 @@ function readVerifiedFontRequest(
     throw new Error("Chrome font identity request schema is invalid");
   const captures = jsonArray(value.captures, "font identity request captures").map((capture) => {
     const row = jsonRecord(capture, "font identity request capture");
+    const observerFaces = parseChromeObserverFontFaces(row.observerFaces);
     return {
       conditionId: jsonText(row.conditionId, "request condition id"),
       selectedFonts: jsonSelectedFonts(row.selectedFonts),
       resourceFiles: jsonResourceFiles(row.resourceFiles),
+      ...(observerFaces.length > 0 && { observerFaces }),
     };
   });
   return createChromeFontIdentityRequest(captures, expectedConditionIds);
@@ -1760,6 +1764,10 @@ function preflightFontIdentityCondition(
     !sameJson(
       observedFonts.map((font) => ({ ...font })) as unknown as JsonValue,
       request.selectedFonts.map((font) => ({ ...font })) as unknown as JsonValue,
+    ) ||
+    !sameJson(
+      parseChromeObserverFontFaces(row.observerFaces) as unknown as JsonValue,
+      (request.observerFaces ?? []) as unknown as JsonValue,
     ) ||
     observation.status !== "observed"
   )
@@ -1976,15 +1984,9 @@ async function captureCatalogCondition(
       chromeExecutable,
     );
     const row = jsonRecord(condition, "catalog condition capture");
-    const observation = jsonRecord(row.fontIdentityObservation, "font identity observation");
-    const resourceProvenance = jsonRecord(row.resourceProvenance, "resource provenance");
     return {
       condition,
-      fontIdentityRequest: {
-        conditionId: tuple.conditionId,
-        selectedFonts: jsonSelectedFonts(observation.selectedFonts),
-        resourceFiles: jsonResourceFiles(resourceProvenance.requests),
-      },
+      fontIdentityRequest: catalogFontIdentityCapture(row, tuple.conditionId),
     };
   } catch (error) {
     return {
@@ -2018,6 +2020,7 @@ async function executeCatalogCondition(
   chromeExecutable: ResolvedCatalogChromeExecutable,
 ): Promise<JsonValue> {
   let traceBinding: JsonValue | undefined;
+  let observerFaces: ChromeObserverFontFace[] = [];
   let chrome: Awaited<ReturnType<typeof captureChromeCatalogCondition>>;
   if (chromeExecutable.fontObserver) {
     const tracePath = `${chromePath}.trace.json`;
@@ -2039,6 +2042,10 @@ async function executeCatalogCondition(
         ),
     });
     chrome = observed.value;
+    observerFaces = selectChromeObserverFontFaces(
+      chrome.fontIdentityObservation.selectedFonts,
+      observed.trace.instances,
+    );
     traceBinding = {
       schema: "krr-chromium-font-capture-v1",
       conditionId: tuple.conditionId,
@@ -2088,27 +2095,34 @@ async function executeCatalogCondition(
     chrome.resourceProvenance,
     traceBinding,
   );
-  if (krr.status === "unknown")
-    return unknownCatalogCondition(
-      tuple,
-      fixtureSha,
-      binarySha256,
-      chrome,
-      chromePath,
-      reportPath,
-      chromeReceiptPath,
-      krr,
-    );
-  return unverifiedChromeCatalogCondition(
-    tuple,
-    fixtureSha,
-    binarySha256,
-    chrome,
-    chromePath,
-    reportPath,
-    chromeReceiptPath,
-    krr,
-  );
+  const condition =
+    krr.status === "unknown"
+      ? unknownCatalogCondition(
+          tuple,
+          fixtureSha,
+          binarySha256,
+          chrome,
+          chromePath,
+          reportPath,
+          chromeReceiptPath,
+          krr,
+        )
+      : unverifiedChromeCatalogCondition(
+          tuple,
+          fixtureSha,
+          binarySha256,
+          chrome,
+          chromePath,
+          reportPath,
+          chromeReceiptPath,
+          krr,
+        );
+  return observerFaces.length === 0
+    ? condition
+    : ({
+        ...jsonRecord(condition, "catalog capture condition"),
+        observerFaces,
+      } as unknown as JsonValue);
 }
 
 function unknownCatalogCondition(

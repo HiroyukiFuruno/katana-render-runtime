@@ -42,6 +42,7 @@ fn custom_font_request(fixture: &CliFixture, custom_path: &Path) -> Result<Probe
             condition_id: "probe-custom-face".to_string(),
             selected_fonts: vec![selected],
             resource_files: vec![font_resource, fixture.nonfont_resource.clone()],
+            observer_faces: Vec::new(),
         }],
     })
 }

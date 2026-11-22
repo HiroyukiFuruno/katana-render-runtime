@@ -21,6 +21,7 @@ fn request() -> ProbeRequest {
             condition_id: CONDITION_ID.to_string(),
             selected_fonts: Vec::new(),
             resource_files: Vec::new(),
+            observer_faces: Vec::new(),
         }],
     }
 }
@@ -62,7 +63,7 @@ fn font_probe_rejects_invalid_request_shape_and_duplicate_selected_font() -> Res
     }
     let (_temp, _, selected) = physical_font_fixture()?;
     let mut duplicate = request();
-    duplicate.captures[0].selected_fonts = vec![selected.clone(), selected];
+    duplicate.captures[0].selected_fonts = vec![selected.clone(), selected.clone()];
     assert_eq!(
         probe_serialized(&duplicate).err().as_deref(),
         Some("duplicate CDP selected-font entry")
@@ -89,6 +90,7 @@ fn font_probe_keeps_duplicate_resources_and_incomplete_identity_unknown() -> Res
         condition_id: "incomplete-font".into(),
         selected_fonts: vec![selected],
         resource_files: Vec::new(),
+        observer_faces: Vec::new(),
     });
     let observed = probe_serialized(&request)?;
     assert_unknown_captures(observed)
@@ -107,6 +109,7 @@ fn captured_font_bytes_do_not_resolve_a_different_postscript_name() -> Result<()
         condition_id: "uncaptured-font".into(),
         selected_fonts: vec![selected],
         resource_files: vec![resource],
+        observer_faces: Vec::new(),
     });
     let observed = probe_serialized(&request)?;
     let [verified, unknown] = observed.captures.as_slice() else {

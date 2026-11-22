@@ -171,6 +171,78 @@ describe("Chrome font identity request", () => {
   });
 });
 
+describe("retained Chrome system font face evidence", () => {
+  const selected = {
+    familyName: "Proof Sans",
+    postScriptName: "ProofSans-Regular",
+    isCustomFont: false,
+  };
+  const instance = {
+    processId: 2,
+    processRole: "renderer",
+    physicalFilePath: "/fixture/proof.ttc",
+    physicalFileSHA256: "d".repeat(64),
+    physicalFaceTtcIndex: 1,
+    postScriptName: selected.postScriptName,
+    fvarTablePresent: false,
+    axes: [],
+    coordinates: [],
+    paintSerials: [1],
+    join: { retainedPaintCount: 1, strikeCacheCount: 1, scalerFontCount: 1 },
+  } satisfies ChromiumFontInstance;
+
+  test("uses one verified physical identity even when represented in multiple renderer records", () => {
+    const faces = selectChromeObserverFontFaces(
+      [selected],
+      [instance, { ...instance, processId: 3 }],
+    );
+    expect(faces).toEqual([
+      {
+        postScriptName: selected.postScriptName,
+        filePath: instance.physicalFilePath,
+        fileSha256: instance.physicalFileSHA256,
+        faceIndex: instance.physicalFaceTtcIndex,
+      },
+    ]);
+    expect(
+      selectChromeObserverFontFaces([{ ...selected, isCustomFont: true }], [instance]),
+    ).toEqual([]);
+    expect(selectChromeObserverFontFaces([selected, selected], [instance])).toEqual([]);
+    expect(
+      selectChromeObserverFontFaces(
+        [selected],
+        [instance, { ...instance, physicalFilePath: "/fixture/other.ttc" }],
+      ),
+    ).toEqual([]);
+  });
+
+  test("revalidates the request against the retained trace and binds any fallback response", () => {
+    const trace = { traceSha256: "a".repeat(64), sessionId: "fixture", instances: [instance] };
+    const faces = selectChromeObserverFontFaces([selected], trace.instances);
+    const font = {
+      scope: "capture",
+      family: selected.familyName,
+      source:
+        "Chrome CDP fixture; Chrome retained font observation; exact PostScript-name match; physical file SHA and face index verified",
+      filePath: "/fixture/proof.ttc",
+      fileSha256: instance.physicalFileSHA256,
+      faceIndex: instance.physicalFaceTtcIndex,
+    };
+    expect(() =>
+      assertChromeObserverFontFaceBindings(faces, [selected], trace, [font]),
+    ).not.toThrow();
+    expect(() =>
+      assertChromeObserverFontFaceBindings(faces, [selected], undefined, [font]),
+    ).toThrow(/retained trace/);
+    expect(() =>
+      assertChromeObserverFontFaceBindings(undefined, [selected], trace, [font]),
+    ).toThrow(/selected physical face/);
+    expect(() =>
+      assertChromeObserverFontFaceBindings(faces, [selected], trace, [{ ...font, faceIndex: 2 }]),
+    ).toThrow(/selected physical face/);
+  });
+});
+
 describe("catalog stage90 rejection diagnostics", () => {
   const completeRow = {
     status: "unverified",
@@ -274,16 +346,29 @@ describe("catalog stage90 rejection diagnostics", () => {
 
   test("reports only allowlisted stages of font reconciliation", () => {
     const diagnostics = catalogStage90RejectionDiagnostics(
-      ["observed-stage", "untrusted-stage"],
+      ["observed-stage", "untrusted-stage", "ambiguous-font", "inaccessible-font"],
       [
         { ...completeRow, fontIdentityFailureStage: "font-reconciliation-krr-receipt" },
         { ...completeRow, fontIdentityFailureStage: "/private/evidence.json" },
+        {
+          ...completeRow,
+          fontIdentityUnknownReasons: [
+            "private font: multiple physical file/face-index matches are ambiguous",
+          ],
+        },
+        {
+          ...completeRow,
+          fontIdentityUnknownReasons: ["private font: read font: /private/font.ttc"],
+        },
       ],
     );
     expect(diagnostics.conditions.map((condition) => condition.detail)).toEqual([
       "font-reconciliation-krr-receipt",
       undefined,
+      "font-probe-ambiguous-physical-face",
+      "font-probe-file-unavailable",
     ]);
+    expect(JSON.stringify(diagnostics)).not.toContain("/private/");
   });
 });
 
@@ -344,3 +429,9 @@ describe("input-state visual fidelity phases", () => {
     ).rejects.toThrow(/unsupported.*phase/);
   });
 });
+
+import type { ChromiumFontInstance } from "./chromium-font-trace";
+import {
+  assertChromeObserverFontFaceBindings,
+  selectChromeObserverFontFaces,
+} from "./chromium-observer-font-pins";

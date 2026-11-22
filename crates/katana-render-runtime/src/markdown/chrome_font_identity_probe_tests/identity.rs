@@ -1,4 +1,4 @@
-use super::{CoreTextDescriptorEvidence, ResourceFile};
+use super::{CoreTextDescriptorEvidence, ObserverFace, ResourceFile, SelectedFont};
 use resvg::usvg::fontdb::{Database, FaceInfo, Source};
 use sha2::{Digest, Sha256};
 use std::{
@@ -14,6 +14,10 @@ mod resources;
 #[path = "identity_resolution.rs"]
 mod resolution;
 
+#[path = "identity_observer.rs"]
+mod observer;
+
+pub(super) use observer::resolve_observer_face;
 pub(super) use resolution::{FontResolutionCache, resolve_font_with_cache};
 
 #[cfg(target_os = "macos")]
@@ -153,3 +157,7 @@ mod contract_tests;
 #[cfg(test)]
 #[path = "identity_physical_read_tests.rs"]
 mod physical_read_tests;
+
+#[cfg(test)]
+#[path = "identity_observer_tests.rs"]
+mod observer_tests;

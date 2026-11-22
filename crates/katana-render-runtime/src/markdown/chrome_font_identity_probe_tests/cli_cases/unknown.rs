@@ -27,6 +27,7 @@ fn unknown_font_request(fixture: &CliFixture) -> ProbeRequest {
                 false,
             )],
             resource_files: Vec::new(),
+            observer_faces: Vec::new(),
         }],
     }
 }

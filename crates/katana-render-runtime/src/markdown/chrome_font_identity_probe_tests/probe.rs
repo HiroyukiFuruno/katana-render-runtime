@@ -1,6 +1,6 @@
 use super::{
-    CaptureRequest, CaptureResult, FontProvenance, INVENTORY_METHOD, ProbeRequest, ProbeResponse,
-    REQUEST_SCHEMA, RESPONSE_SCHEMA, SelectedFont,
+    CaptureRequest, CaptureResult, FontProvenance, INVENTORY_METHOD, ObserverFace, ProbeRequest,
+    ProbeResponse, REQUEST_SCHEMA, RESPONSE_SCHEMA, SelectedFont,
 };
 use crate::markdown::chrome_font_identity_probe_tests::identity::{
     FontResolutionCache, load_resource_database, resolve_font_with_cache, sha256,
@@ -11,6 +11,17 @@ use std::collections::BTreeSet;
 #[path = "probe_capture.rs"]
 mod capture;
 use capture::probe_capture;
+
+#[cfg(test)]
+#[path = "probe_observer_tests.rs"]
+mod observer_tests;
+
+pub(super) struct ResolutionInputs<'a> {
+    pub(super) resource_database: &'a Database,
+    pub(super) resources: &'a [super::ResourceFile],
+    pub(super) resource_error: Option<&'a str>,
+    pub(super) observer_faces: &'a [ObserverFace],
+}
 
 pub(super) fn probe(request_bytes: &[u8]) -> Result<ProbeResponse, String> {
     let request: ProbeRequest =
@@ -53,7 +64,18 @@ fn validate_capture_identity(
     {
         return Err("capture condition IDs must be non-empty and unique".to_string());
     }
-    validate_unique_selected_fonts(&capture.selected_fonts)
+    validate_unique_selected_fonts(&capture.selected_fonts)?;
+    validate_unique_observer_faces(&capture.observer_faces)
+}
+
+fn validate_unique_observer_faces(faces: &[ObserverFace]) -> Result<(), String> {
+    let mut names = BTreeSet::new();
+    for face in faces {
+        if face.post_script_name.trim().is_empty() || !names.insert(face.post_script_name.clone()) {
+            return Err("observer font identities must have unique PostScript names".to_string());
+        }
+    }
+    Ok(())
 }
 
 fn validate_unique_selected_fonts(fonts: &[SelectedFont]) -> Result<(), String> {
@@ -73,42 +95,40 @@ fn validate_unique_selected_fonts(fonts: &[SelectedFont]) -> Result<(), String> 
 
 fn resolve_selected_font(
     system_database: &Database,
-    resource_database: &Database,
-    resources: &[super::ResourceFile],
-    resource_error: Option<&str>,
+    inputs: ResolutionInputs<'_>,
     selected: SelectedFont,
     resolution_cache: &mut FontResolutionCache<'_>,
     result: &mut CaptureResult,
 ) {
-    let resolution = resolve_selected_identity(
-        system_database,
-        resource_database,
-        resources,
-        resource_error,
-        &selected,
-        resolution_cache,
-    );
+    let resolution =
+        resolve_selected_identity(system_database, inputs, &selected, resolution_cache);
     record_selected_resolution(selected, resolution, result);
 }
 
 fn resolve_selected_identity(
     system_database: &Database,
-    resource_database: &Database,
-    resources: &[super::ResourceFile],
-    resource_error: Option<&str>,
+    inputs: ResolutionInputs<'_>,
     selected: &SelectedFont,
     resolution_cache: &mut FontResolutionCache<'_>,
 ) -> Result<super::identity::ResolvedFont, String> {
-    if let Some(error) = custom_resource_error(selected.is_custom_font, resource_error) {
+    if let Some(error) = custom_resource_error(selected.is_custom_font, inputs.resource_error) {
         return Err(error);
     }
-    resolve_font_with_cache(
+    let native = resolve_font_with_cache(
         system_database,
-        resource_database,
-        resources,
+        inputs.resource_database,
+        inputs.resources,
         selected,
         resolution_cache,
-    )
+    );
+    match native {
+        Ok(resolved) => Ok(resolved),
+        Err(error) if selected.is_custom_font => Err(error),
+        Err(native_error) => {
+            super::identity::resolve_observer_face(selected, inputs.observer_faces)
+                .or(Err(native_error))
+        }
+    }
 }
 
 fn record_selected_resolution(

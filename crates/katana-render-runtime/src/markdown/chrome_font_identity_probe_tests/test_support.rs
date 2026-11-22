@@ -127,6 +127,7 @@ pub(super) fn probe_single_capture(
             condition_id: condition_id.to_string(),
             selected_fonts: vec![selected],
             resource_files: resources,
+            observer_faces: Vec::new(),
         }],
     };
     let temp = TempDirectory::new()?;
@@ -191,3 +192,7 @@ mod contract_tests;
 #[cfg(test)]
 #[path = "test_support_path_tests.rs"]
 mod path_tests;
+
+#[cfg(test)]
+#[path = "test_support_observer_contract_tests.rs"]
+mod observer_contract_tests;
