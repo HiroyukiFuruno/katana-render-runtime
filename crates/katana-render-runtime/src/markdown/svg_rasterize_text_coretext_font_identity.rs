@@ -35,13 +35,16 @@ pub(in crate::markdown::svg_rasterize) fn resolve_actual_face(
 ) -> Option<ActualCoreTextFace> {
     let metadata = actual_font_metadata(font)?;
     let bytes = read_font_bytes(&metadata.canonical_path)?;
-    let face_index = unique_postscript_index(&bytes, &metadata.post_script_name)
-        .or_else(|| unique_name_table_index(&bytes, font))?;
+    let face_index = face_index(&bytes, &metadata.post_script_name, font)?;
     Some(ActualCoreTextFace {
         canonical_path: metadata.canonical_path,
         face_index,
         post_script_name: metadata.post_script_name,
     })
+}
+
+pub(super) fn face_index(bytes: &[u8], name: &str, font: &CTFont) -> Option<u32> {
+    unique_postscript_index(bytes, name).or_else(|| unique_name_table_index(bytes, font))
 }
 
 pub(super) fn matches(database: &Database, id: ID, font: &CTFont) -> bool {

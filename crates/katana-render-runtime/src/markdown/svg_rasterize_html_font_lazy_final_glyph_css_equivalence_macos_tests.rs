@@ -36,14 +36,39 @@ fn actual_layout_zh_hans_system_ui_uses_coretext_han_and_kana_faces() -> Result<
     let trees = audit["finalGlyphTrees"]
         .as_array()
         .ok_or_else(|| "final glyph tree evidence is absent".to_owned())?;
-    for (weight, face, axis_weight) in [
-        (NORMAL_WEIGHT, ".PingFangUITextSC-Regular", 400.0),
-        (NORMAL_WEIGHT, ".CJKSymbolsFallbackSC-Regular", 542.0),
-        (BOLD_WEIGHT, ".PingFangUIDisplaySC-Bold", 700.0),
-    ] {
-        assert_uses_expected_face(&audit, trees, weight, face, axis_weight);
-    }
+    assert_selected_variations(&audit, trees);
     Ok(())
+}
+
+fn assert_selected_variations(audit: &serde_json::Value, trees: &[serde_json::Value]) {
+    const CHINESE_REGULAR_WEIGHT: f32 = 400.0;
+    const CHINESE_BOLD_WEIGHT: f32 = 700.0;
+    const KANA_FALLBACK_WEIGHT: f32 = 542.0;
+    const KANA_FALLBACK_OPTICAL_SIZE: f32 = 19.0;
+    type ExpectedFont<'a> = (u64, &'a str, &'a [(&'a str, f32)]);
+    let expected: &[ExpectedFont<'_>] = &[
+        (
+            NORMAL_WEIGHT,
+            ".PingFangUITextSC-Regular",
+            &[("wght", CHINESE_REGULAR_WEIGHT)],
+        ),
+        (
+            NORMAL_WEIGHT,
+            ".CJKSymbolsFallbackSC-Regular",
+            &[
+                ("wght", KANA_FALLBACK_WEIGHT),
+                ("opsz", KANA_FALLBACK_OPTICAL_SIZE),
+            ],
+        ),
+        (
+            BOLD_WEIGHT,
+            ".PingFangUIDisplaySC-Bold",
+            &[("wght", CHINESE_BOLD_WEIGHT)],
+        ),
+    ];
+    for &(weight, face, axes) in expected {
+        assert_uses_expected_face(audit, trees, weight, face, axes);
+    }
 }
 
 #[test]
@@ -60,7 +85,7 @@ fn actual_layout_single_native_display_glyph_paints_ink() -> Result<(), String> 
             .as_chunks::<4>()
             .0
             .iter()
-            .any(|pixel| pixel[0] < DARK_INK_LIMIT),
+            .any(|pixel| pixel[3] != 0 && pixel[0] < DARK_INK_LIMIT),
         "the standalone Chinese glyph painted no dark pixels"
     );
     Ok(())
@@ -71,11 +96,11 @@ fn assert_uses_expected_face(
     trees: &[serde_json::Value],
     weight: u64,
     expected: &str,
-    axis_weight: f32,
+    expected_axes: &[(&str, f32)],
 ) {
     assert!(
-        final_span_uses_face_matching(trees, weight, |name| name == expected, Some(axis_weight)),
-        "missing {expected} at weight {weight}; requested {:?}; glyph errors {:?}; observed faces {:?}",
+        final_span_uses_face_matching(trees, weight, |name| name == expected, expected_axes),
+        "missing {expected} with {expected_axes:?} at weight {weight}; requested {:?}; glyph errors {:?}; observed faces {:?}",
         rows_for_weight(audit, weight),
         trees
             .iter()
@@ -150,7 +175,7 @@ fn assert_computed_weight(audit: &serde_json::Value, weight: u64) -> Result<(), 
 }
 
 fn final_span_uses_face(trees: &[serde_json::Value], weight: u64, postscript: &str) -> bool {
-    final_span_uses_face_matching(trees, weight, |name| name == postscript, None)
+    final_span_uses_face_matching(trees, weight, |name| name == postscript, &[])
 }
 
 fn final_span_uses_face_prefix(trees: &[serde_json::Value], weight: u64, prefix: &str) -> bool {
@@ -161,7 +186,7 @@ fn final_span_uses_face_prefix(trees: &[serde_json::Value], weight: u64, prefix:
         trees,
         weight,
         |name| name.starts_with(prefix),
-        Some(actual_wght),
+        &[("wght", actual_wght)],
     )
 }
 
@@ -169,18 +194,18 @@ fn final_span_uses_face_matching(
     trees: &[serde_json::Value],
     weight: u64,
     matches_name: impl Fn(&str) -> bool,
-    actual_wght: Option<f32>,
+    expected_axes: &[(&str, f32)],
 ) -> bool {
     trees
         .iter()
-        .any(|tree| tree_has_weighted_face(tree, weight, &matches_name, actual_wght))
+        .any(|tree| tree_has_weighted_face(tree, weight, &matches_name, expected_axes))
 }
 
 fn tree_has_weighted_face(
     tree: &serde_json::Value,
     weight: u64,
     matches_name: &impl Fn(&str) -> bool,
-    actual_wght: Option<f32>,
+    expected_axes: &[(&str, f32)],
 ) -> bool {
     let Some(faces) = tree["faces"].as_array() else {
         return false;
@@ -190,7 +215,7 @@ fn tree_has_weighted_face(
             && face["source"]["post_script_name"]
                 .as_str()
                 .is_some_and(matches_name)
-            && tree_span_uses_face(tree, &face["faceId"], weight, actual_wght)
+            && tree_span_uses_face(tree, &face["faceId"], weight, expected_axes)
     })
 }
 
@@ -198,13 +223,15 @@ fn tree_span_uses_face(
     tree: &serde_json::Value,
     face_id: &serde_json::Value,
     weight: u64,
-    actual_wght: Option<f32>,
+    expected_axes: &[(&str, f32)],
 ) -> bool {
     tree["textSpans"].as_array().is_some_and(|spans| {
         spans.iter().any(|span| {
             span["requested"]["weight"] == weight
                 && span["glyphCount"].as_u64().is_some_and(|count| count > 0)
-                && actual_wght.is_none_or(|expected| span_has_wght(span, expected))
+                && expected_axes
+                    .iter()
+                    .all(|&(tag, value)| span_has_variation(span, tag, value))
                 && span["faces"].as_array().is_some_and(|faces| {
                     faces
                         .iter()
@@ -214,13 +241,12 @@ fn tree_span_uses_face(
     })
 }
 
-fn span_has_wght(span: &serde_json::Value, expected: f32) -> bool {
+fn span_has_variation(span: &serde_json::Value, tag: &str, expected: f32) -> bool {
     span["layoutVariations"]
         .as_array()
         .is_some_and(|variations| {
             variations.iter().any(|variation| {
-                variation["tag"] == "wght"
-                    && variation["value"].as_f64() == Some(f64::from(expected))
+                variation["tag"] == tag && variation["value"].as_f64() == Some(f64::from(expected))
             })
         })
 }

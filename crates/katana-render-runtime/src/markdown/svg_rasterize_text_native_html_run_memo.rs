@@ -144,15 +144,11 @@ fn selected_face(
     result: NativeHtmlFallback,
     ch: char,
 ) -> Option<SelectedFace> {
-    let (variations, outline_units) = database.with_face_data(id, |bytes, index| {
-        axes::variation_coordinates(bytes, index, ch, &result.explicit_variations)
+    let face = database.face(id)?;
+    let (variations, outline) = database.with_face_data(id, |bytes, index| {
+        axes::selected_font_axes(result, face, bytes, index, ch)
     })??;
-    let outline = outline_units.map(|units_per_em| native_html_faces::OutlineInstance {
-        font: result.font,
-        variations: variations.clone(),
-        units_per_em,
-    });
-    let alias = native_html_faces::register(database.face(id)?, outline)?;
+    let alias = native_html_faces::register(face, outline)?;
     Some(SelectedFace {
         database,
         id,

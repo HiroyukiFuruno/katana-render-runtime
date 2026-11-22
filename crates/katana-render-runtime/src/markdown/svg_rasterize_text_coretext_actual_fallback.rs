@@ -2,10 +2,13 @@ use super::font_identity;
 use crate::markdown::svg_rasterize::font::platform::INTERFACE_BOLD_WEIGHT;
 use objc2_core_foundation::{CFDictionary, CFNumber, CFRange, CFRetained, CFString};
 use objc2_core_text::{CTFont, CTFontUIFontType};
-use resvg::usvg::fontdb::{Database, ID};
+use resvg::usvg::fontdb::{Database, FaceInfo, ID};
 use std::collections::BTreeMap;
 
 pub(in crate::markdown::svg_rasterize) use font_identity::ActualCoreTextFace;
+
+#[path = "svg_rasterize_text_coretext_scaler.rs"]
+mod scaler;
 
 const NORMAL_FONT_WEIGHT: u16 = 400;
 const MAX_EXPLICIT_VARIATIONS: usize = 16;
@@ -20,6 +23,24 @@ pub(in crate::markdown::svg_rasterize) struct NativeHtmlFallback {
     pub(in crate::markdown::svg_rasterize) font: CFRetained<CTFont>,
     pub(in crate::markdown::svg_rasterize) explicit_variations:
         BTreeMap<[u8; OPENTYPE_TAG_BYTES], f64>,
+}
+
+impl NativeHtmlFallback {
+    pub(in crate::markdown::svg_rasterize) fn into_optical_scaler(
+        self,
+        face: &FaceInfo,
+        bytes: &[u8],
+        index: u32,
+    ) -> Option<Self> {
+        let font = scaler::scaler_font(&self.font)?;
+        if !scaler::matches_copied_face(&font, face, bytes, index) {
+            return None;
+        }
+        Some(Self {
+            explicit_variations: explicit_variations(&font)?,
+            font,
+        })
+    }
 }
 
 pub(in crate::markdown::svg_rasterize) fn actual_face_for(
