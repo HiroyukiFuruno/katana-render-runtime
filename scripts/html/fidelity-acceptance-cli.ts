@@ -12,6 +12,7 @@ import {
   catalogFontAcceptance,
   compareCatalogFontFaces,
   compareChromiumFontInstancesToLayoutRuns,
+  type FontInstanceSetDifference,
 } from "./catalog-font-equivalence";
 import { catalogStage90RejectionDiagnostics } from "./catalog-stage90-rejection-diagnostics";
 import { readChromiumFontBinding } from "./chromium-font-binding";
@@ -459,6 +460,7 @@ function reportCatalogDiagnosticFontChecks(
   const captures = jsonRecords(manifest.conditions, "diagnostic capture conditions");
   const probe = validateCatalogFontProbe(manifest);
   const indexed = indexFontIdentityConditions(captures, probe);
+  const instanceDifferences: { conditionId: string; difference: FontInstanceSetDifference }[] = [];
   const validated = testedConditionIds.map((conditionId) => {
     const capture = indexed.captures.get(conditionId);
     const request = indexed.requests.get(conditionId);
@@ -466,7 +468,14 @@ function reportCatalogDiagnosticFontChecks(
     if (!capture || !request || !response)
       throw new Error("Diagnostic font evidence is incomplete");
     if (capture.status !== "captured") return capture;
-    const reason = validateFontIdentityCondition(conditionId, capture, request, response, probe);
+    const reason = validateFontIdentityCondition(
+      conditionId,
+      capture,
+      request,
+      response,
+      probe,
+      (difference) => instanceDifferences.push({ conditionId, difference }),
+    );
     return reason === null
       ? capture
       : {
@@ -483,6 +492,7 @@ function reportCatalogDiagnosticFontChecks(
       profile: "selected-conditions",
       acceptance: false,
       testedConditionIds,
+      ...(instanceDifferences.length > 0 ? { instanceDifferences } : {}),
     }),
   );
 }
@@ -687,6 +697,7 @@ function validateFontIdentityCondition(
   requestCapture: { [key: string]: JsonValue },
   responseCapture: { [key: string]: JsonValue },
   probe: CatalogFontProbeValidation,
+  reportInstanceDifference?: (difference: FontInstanceSetDifference) => void,
 ): string | null {
   try {
     assertFontIdentityRequestBinding(conditionId, capture, requestCapture, responseCapture, probe);
@@ -695,6 +706,7 @@ function validateFontIdentityCondition(
       capture,
       requestCapture,
       responseCapture,
+      reportInstanceDifference,
     );
     return reason;
   } catch (error) {
@@ -755,6 +767,7 @@ function compareFontIdentityReceipts(
   capture: { [key: string]: JsonValue },
   requestCapture: { [key: string]: JsonValue },
   responseCapture: { [key: string]: JsonValue },
+  reportInstanceDifference?: (difference: FontInstanceSetDifference) => void,
 ): string | null {
   const krr = readPinnedJsonRecord(
     jsonText(capture.krrReportPath, "KRR report path"),
@@ -800,7 +813,11 @@ function compareFontIdentityReceipts(
     jsonRecords(responseCapture.fontProvenance, "response font provenance"),
   );
   const comparison = trace
-    ? compareChromiumFontInstancesToLayoutRuns(trace.instances, krr.fontProvenance)
+    ? compareChromiumFontInstancesToLayoutRuns(
+        trace.instances,
+        krr.fontProvenance,
+        reportInstanceDifference,
+      )
     : compareCatalogFontFaces(krr.fontProvenance, chrome.fontProvenance);
   return comparison.established
     ? null

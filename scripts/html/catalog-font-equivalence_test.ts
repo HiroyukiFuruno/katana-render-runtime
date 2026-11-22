@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import type { FontInstanceSetDifference } from "./catalog-font-equivalence";
 import {
   catalogFontAcceptance,
   compareCatalogFontFaces,
@@ -243,4 +244,100 @@ test("compares Chromium instances with complete KRR applied design coordinates",
   expect(
     compareChromiumFontInstancesToLayoutRuns([variable, regular], [face(complete)]),
   ).toMatchObject({ established: false });
+
+  const orderedCoordinates = ({ coordinates }: ChromiumFontInstance) =>
+    coordinates
+      .map(({ identifier, value }) => [identifier, value] as const)
+      .sort(([left], [right]) => left - right);
+  const differences: FontInstanceSetDifference[] = [];
+  const mismatch = compareChromiumFontInstancesToLayoutRuns(
+    [variable],
+    [face(regularCoordinates)],
+    (difference) => differences.push(difference),
+  );
+  expect(mismatch).toEqual({
+    established: false,
+    reason: "Chrome and KRR font instance sets differ",
+  });
+  expect(differences).toEqual([
+    {
+      chromeCount: 1,
+      krrCount: 1,
+      groups: [
+        {
+          faceOrdinal: 0,
+          faceIndex: 0,
+          chromeOnly: [orderedCoordinates(variable)],
+          krrOnly: [orderedCoordinates(regular)],
+        },
+      ],
+      truncated: false,
+    },
+  ]);
+  expect(JSON.stringify(differences[0])).not.toContain(fileSha256);
+
+  const completeDifferences: FontInstanceSetDifference[] = [];
+  expect(
+    compareChromiumFontInstancesToLayoutRuns([variable, regular], mixedFaces, (difference) =>
+      completeDifferences.push(difference),
+    ),
+  ).toEqual({ established: true, reason: null });
+  expect(completeDifferences).toEqual([]);
+
+  const otherPath = path.resolve(
+    "crates/katana-render-runtime/assets/test-fixtures/font-probes/recursive-latin-crsv-normal.ttf",
+  );
+  const otherSha256 = createHash("sha256").update(fs.readFileSync(otherPath)).digest("hex");
+  const physicalDifferences: FontInstanceSetDifference[] = [];
+  compareChromiumFontInstancesToLayoutRuns(
+    [variable],
+    [{ ...face(complete), filePath: otherPath, fileSha256: otherSha256 }],
+    (difference) => physicalDifferences.push(difference),
+  );
+  expect(physicalDifferences[0]?.groups).toHaveLength(2);
+  expect(physicalDifferences[0]?.groups.flatMap((group) => group.chromeOnly)).toEqual([
+    orderedCoordinates(variable),
+  ]);
+  expect(physicalDifferences[0]?.groups.flatMap((group) => group.krrOnly)).toEqual([
+    orderedCoordinates(variable),
+  ]);
+
+  const axes = Array.from({ length: 33 }, (_, identifier) => ({
+    identifier,
+    minimum: 0,
+    maximum: 16,
+  }));
+  const bounded: FontInstanceSetDifference[] = [];
+  compareChromiumFontInstancesToLayoutRuns(
+    Array.from({ length: 17 }, (_, index) => ({
+      ...variable,
+      axes,
+      coordinates: axes.map(({ identifier }) => ({
+        identifier,
+        value: identifier === 0 ? index : 0,
+      })),
+    })),
+    [face([])],
+    (difference) => bounded.push(difference),
+  );
+  expect(bounded[0]).toMatchObject({ chromeCount: 17, krrCount: 1, truncated: true });
+  expect(bounded[0]?.groups).toHaveLength(1);
+  expect(bounded[0]?.groups[0]?.chromeOnly).toHaveLength(16);
+  expect(
+    bounded[0]?.groups
+      .flatMap((group) => [...group.chromeOnly, ...group.krrOnly])
+      .every((variation) => variation.length <= 32),
+  ).toBe(true);
+
+  const groupBounded: FontInstanceSetDifference[] = [];
+  compareChromiumFontInstancesToLayoutRuns(
+    Array.from({ length: 17 }, (_, index) => ({
+      ...variable,
+      physicalFileSHA256: index.toString(16).padStart(64, "0"),
+    })),
+    [face([])],
+    (difference) => groupBounded.push(difference),
+  );
+  expect(groupBounded[0]).toMatchObject({ chromeCount: 17, krrCount: 1, truncated: true });
+  expect(groupBounded[0]?.groups).toHaveLength(16);
 });
