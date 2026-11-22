@@ -57,6 +57,9 @@ resvgの `identity_op` / `too_many_arguments` / `upper_case_acronyms` / `wrong_s
 - HTML用の任意のfallback resolverへ、元の要求font属性を渡す。
   primary faceの物理weightで要求CSS weightを置き換えず、nested SVGにも同じresolverを渡す。
   未設定時は元のfallback resolverを使い、既定の選択処理は変更しない。
+- 標準fontdb outlineが得られないglyphに限り、任意の内部outline providerを呼べるようにする。
+  COLR・SVG・raster glyphと標準outlineを優先し、providerは同じfont ID・glyph ID・実効variation座標を受ける。
+  結果は既存outline cacheに保存し、未設定時とproviderが`None`を返す場合の既定描画は変更しない。nested SVGにも同じproviderを渡す。
 
 Issue #119では37ファイルの135関数を責務ごとのprivate helperへ分割する。
 公開API、演算順、キャッシュ、描画動作を維持し、既存の描画・性能回帰で確認する。
