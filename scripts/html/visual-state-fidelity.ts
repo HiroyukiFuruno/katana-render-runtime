@@ -2290,7 +2290,7 @@ function navigationCatalogOperationSpec(spec: VisualStateSpec, state: string): V
   };
 }
 
-async function captureChromeCatalogCondition(
+export async function captureChromeCatalogCondition(
   browser: Awaited<ReturnType<typeof chromium.launch>>,
   entry: CatalogCase,
   state: string,

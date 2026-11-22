@@ -1717,6 +1717,23 @@ describe("fixed fidelity acceptance CLI routes", () => {
     expect(() => fidelityAcceptancePlan(duplicate)).toThrow();
   });
 
+  test("system font diagnostics accept only an absolute observer executable and SHA pin", () => {
+    const mode = "catalog-stage90-system-fonts";
+    const executable = "/opt/observers/headless_shell";
+    const sha256 = "a".repeat(64);
+    expect(fidelityAcceptancePlan([mode, executable, sha256])).toEqual({
+      kind: mode,
+      observer: { path: executable, sha256 },
+    });
+    for (const argv of [
+      [mode, "headless_shell", sha256],
+      [mode, executable, "bad"],
+      [mode, executable, sha256, "extra"],
+    ]) {
+      expect(() => fidelityAcceptancePlan(argv)).toThrow(/invalid observer arguments/);
+    }
+  });
+
   test("catalog resume requires both prior manifests and preserves the complete capture contract", () => {
     const argv = ["catalog-stage90-capture", "build.jsonl", "plan.json", "out"];
     const original = fidelityAcceptancePlan(argv);

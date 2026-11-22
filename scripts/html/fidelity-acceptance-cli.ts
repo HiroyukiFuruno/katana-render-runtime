@@ -9,6 +9,10 @@ import {
   validateCatalogBinaryClosure,
 } from "./catalog-capture-binary";
 import {
+  parseSystemFontObserver,
+  reportCatalogSystemFonts,
+} from "./catalog-chrome-system-font-diagnostic";
+import {
   catalogFontAcceptance,
   compareCatalogFontFaces,
   compareChromiumFontInstancesToLayoutRuns,
@@ -32,6 +36,7 @@ import { tocBinaryFromBuildReport } from "./toc-fidelity";
 import {
   type CatalogStage90ChromeExecutablePin,
   type CatalogStage90ResumeOptions,
+  captureChromeCatalogCondition,
   jsonResourceFiles,
   jsonSelectedFonts,
   runCatalogStage90Captures,
@@ -51,6 +56,7 @@ const modeSchema = z.enum([
   "catalog-stage90-plan",
   "catalog-stage90-capture",
   "catalog-stage90-diagnostic-capture",
+  "catalog-stage90-system-fonts",
   "catalog-stage90-validate",
   "catalog-stage90-validate-captures",
   "catalog-stage90-validate-binary-closure",
@@ -63,6 +69,7 @@ type LegacyCaptureMode = Exclude<
   | "catalog-stage90-plan"
   | "catalog-stage90-capture"
   | "catalog-stage90-diagnostic-capture"
+  | "catalog-stage90-system-fonts"
   | "catalog-stage90-validate"
   | "catalog-stage90-validate-captures"
   | "catalog-stage90-validate-binary-closure"
@@ -107,6 +114,11 @@ interface CatalogPlanWrite {
   acceptance: false;
 }
 
+interface CatalogSystemFontsPlan {
+  kind: "catalog-stage90-system-fonts";
+  observer: ReturnType<typeof parseSystemFontObserver>;
+}
+
 interface CatalogValidatePlan {
   kind: "catalog-stage90-validate";
   candidateSuite: string;
@@ -143,6 +155,7 @@ export type FidelityAcceptancePlan =
   | ReportsPlan
   | CatalogPlanWrite
   | CatalogDiagnosticCapturePlan
+  | CatalogSystemFontsPlan
   | CatalogCapturePlan
   | CatalogValidatePlan
   | CatalogValidateCapturesPlan
@@ -179,6 +192,8 @@ const capturePlans: Record<LegacyCaptureMode, CapturePlan> = {
 
 export function fidelityAcceptancePlan(argv: readonly string[]): FidelityAcceptancePlan {
   const mode = modeSchema.parse(argv[0]);
+  if (mode === "catalog-stage90-system-fonts")
+    return { kind: mode, observer: parseSystemFontObserver(argv.slice(1)) };
   const catalogPlan = catalogModePlan(mode, argv);
   if (catalogPlan) return catalogPlan;
   const reportPlan = reportsModePlan(mode, argv);
@@ -404,6 +419,21 @@ export async function runFidelityAcceptance(argv: readonly string[]): Promise<vo
   }
   if (plan.kind === "catalog-stage90-diagnostic-capture") {
     await runCatalogDiagnosticCapture(plan);
+    return;
+  }
+  if (plan.kind === "catalog-stage90-system-fonts") {
+    await reportCatalogSystemFonts(plan.observer, async (browser, entry, tuple, screenshot) => {
+      const capture = await captureChromeCatalogCondition(
+        browser,
+        entry,
+        tuple.state,
+        screenshot,
+        tuple.viewport,
+        tuple.conditionId,
+        tuple.sourceSha256,
+      );
+      return capture.fontIdentityObservation.selectedFonts;
+    });
     return;
   }
   const binary = tocBinaryFromBuildReport(plan.buildReport);
