@@ -1503,7 +1503,7 @@ jobs:
       - name: Checkout exact measurement source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'macos-stage90' && 'b6a2b84effb6f0103fdf0384a9eed06204df1eab' || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'macos-stage90' && 'eddf0af7b08ad5f014ab083c6c2490d0bb604afc' || github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Record actual source HEAD
@@ -1610,6 +1610,43 @@ jobs:
             "${{ steps.font_observer.outputs.executable }}" \
             031c93c5e822ffd8d22121bb41ed139fb6fcc4e96f6aa1f43ea31ec36fb9242c true "${diagnostic_conditions[@]}"
           echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
+
+      - name: Test retained font proof with the captured native binary
+        if: steps.source.outputs.diagnostic == 'true'
+        run: |
+          binary="tmp/html-performance-stage90/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/captures-binary/runtime-tests"
+          python3 - "$binary" <<'PY'
+          import hashlib
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          binary = Path(sys.argv[1]).resolve(strict=True)
+          with binary.open("rb") as handle:
+              digest = hashlib.file_digest(handle, "sha256").hexdigest()
+          prefix = "markdown::chrome_font_identity_probe_tests::"
+          cases = [
+              "probe::observer_tests::unresolved_system_face_uses_a_verified_retained_observer_face",
+              "probe::observer_tests::custom_faces_do_not_use_retained_observer_fallback",
+              "identity::observer_tests::retained_observer_face_requires_the_selected_physical_font",
+              "identity::observer_tests::retained_observer_face_rejects_changed_or_wrong_face_proofs",
+              "identity::observer_tests::retained_observer_face_requires_one_matching_proof",
+              "test_support::observer_contract_tests::font_probe_rejects_duplicate_observer_font_identities",
+          ]
+          catalog = subprocess.check_output([binary, "--list"], text=True).splitlines()
+          for case in cases:
+              name = prefix + case
+              if catalog.count(f"{name}: test") != 1:
+                  raise SystemExit(f"Expected one native regression case: {name}")
+              result = subprocess.run([binary, "--exact", name], check=False, capture_output=True, text=True)
+              if result.returncode or f"test {name} ... ok" not in result.stdout:
+                  sys.stderr.write(result.stdout + result.stderr)
+                  raise SystemExit(f"Native regression did not complete: {name}")
+              print(f"{name}: passed")
+          with binary.open("rb") as handle:
+              if hashlib.file_digest(handle, "sha256").hexdigest() != digest:
+                  raise SystemExit("Captured native test binary changed")
+          PY
 
       - name: Measure all 84 catalog conditions against baseline
         if: steps.source.outputs.diagnostic != 'true' && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
