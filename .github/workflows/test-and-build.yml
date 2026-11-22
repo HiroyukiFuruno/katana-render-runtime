@@ -49,7 +49,7 @@ on:
           - macos-stage90
           - windows
       verify_filter:
-        description: Optional nextest filter, linux-assets test pattern, full-runtime-assets or remaining-runtime-assets, or linux-fidelity selection.
+        description: Optional nextest filter, linux-assets test pattern, full-runtime-assets or remaining-runtime-assets, or linux-fidelity selection, or system-fonts for macos-stage90.
         required: false
         default: ''
         type: string
@@ -1503,7 +1503,7 @@ jobs:
       - name: Checkout exact measurement source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'macos-stage90' && '33a6984a8c3ed1a7ba10b445fb3009e42ba42d45' || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'macos-stage90' && '37cae9728e2dbecb1a3a6e66656972863e78384e' || github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Record actual source HEAD
@@ -1511,6 +1511,7 @@ jobs:
         run: |
           echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "diagnostic=${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'macos-stage90' }}" >> "$GITHUB_OUTPUT"
+          echo "font_metadata=${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'macos-stage90' && inputs.verify_filter == 'system-fonts' }}" >> "$GITHUB_OUTPUT"
 
       - name: Verify optional local HTML performance evidence
         id: html_local_proof
@@ -1530,13 +1531,13 @@ jobs:
         run: echo 'HTML performance reused from verified maintainer evidence.'
 
       - name: Install Rust toolchain
-        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        if: steps.source.outputs.font_metadata != 'true' && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
         uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: "1.99.1"
 
       - name: Install just
-        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        if: steps.source.outputs.font_metadata != 'true' && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
         uses: taiki-e/install-action@4ccefd7d26b61bbb81f4ff01165e8a6880a1bd59 # just
 
       - name: Install Bun
@@ -1581,23 +1582,32 @@ jobs:
             --output-dir "$observer_work/observer"
           echo "executable=$observer_work/observer/headless_shell" >> "$GITHUB_OUTPUT"
 
+      - name: Inspect macOS system fonts used by Chrome
+        if: steps.source.outputs.font_metadata == 'true'
+        env:
+          OBSERVER_EXECUTABLE: ${{ steps.font_observer.outputs.executable }}
+        run: >-
+          bun scripts/html/fidelity-acceptance-cli.ts catalog-stage90-system-fonts
+          "$OBSERVER_EXECUTABLE"
+          031c93c5e822ffd8d22121bb41ed139fb6fcc4e96f6aa1f43ea31ec36fb9242c
+
       - name: Install Python analysis tools
-        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        if: steps.source.outputs.font_metadata != 'true' && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.13.0"
           enable-cache: true
 
       - name: Initialize fixed capacity reference before interaction Cargo
-        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        if: steps.source.outputs.font_metadata != 'true' && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
         run: python3 scripts/build/initialize_ci_capacity_state.py --root "$PWD"
 
       - name: Verify real interaction state for measurement fixture
-        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        if: steps.source.outputs.font_metadata != 'true' && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
         run: just browser-install html-interaction-check
 
       - name: Capture all 84 HTML catalog conditions
-        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        if: steps.source.outputs.font_metadata != 'true' && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
         id: html84
         run: |
           output_root="tmp/html-performance-stage90/${{ github.run_id }}-${{ github.run_attempt }}"
@@ -1612,7 +1622,7 @@ jobs:
           echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
 
       - name: Test retained font proof with the captured native binary
-        if: steps.source.outputs.diagnostic == 'true'
+        if: steps.source.outputs.diagnostic == 'true' && steps.source.outputs.font_metadata != 'true'
         run: |
           binary="tmp/html-performance-stage90/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/captures-binary/runtime-tests"
           python3 - "$binary" <<'PY'
