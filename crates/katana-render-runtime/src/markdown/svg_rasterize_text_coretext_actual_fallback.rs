@@ -246,8 +246,8 @@ mod tests {
     }
 
     #[test]
-    fn native_ui_fallback_preserves_the_selected_language_and_explicit_weight() -> Result<(), String>
-    {
+    fn native_ui_fallback_preserves_the_selected_language_and_explicit_weight()
+    -> Result<(), Box<dyn std::error::Error>> {
         for (locale, character, expected_name, expected_weight) in [
             ("ja", '装', ".HiraKakuInterface-W4", None),
             ("zh-Hans", '装', ".PingFangUITextSC-Regular", Some(400.0)),
@@ -260,14 +260,15 @@ mod tests {
                 400,
                 Some(locale),
             )
-            .ok_or_else(|| format!("CoreText fallback missing for {locale}"))?;
+            .ok_or("CoreText fallback missing")?;
             assert_actual_selection(&selection, expected_name, expected_weight)?;
         }
         Ok(())
     }
 
     #[test]
-    fn native_ui_bold_display_resolves_the_physical_collection_face() -> Result<(), String> {
+    fn native_ui_bold_display_resolves_the_physical_collection_face()
+    -> Result<(), Box<dyn std::error::Error>> {
         const DISPLAY_SIZE: f64 = 32.0;
         let selection = native_html_fallback(
             NativeHtmlFallbackBase::SystemUi,
@@ -288,7 +289,7 @@ mod tests {
         selection: &NativeHtmlFallback,
         expected_name: &str,
         expected_weight: Option<f64>,
-    ) -> Result<(), String> {
+    ) -> Result<(), Box<dyn std::error::Error>> {
         /* WHY: 同じCTFontから得たphysical faceとvariationを一組で検証する。 */
         let actual_face = actual_face_for(&selection.font).ok_or("physical face missing")?;
         assert_eq!(actual_face.post_script_name, expected_name);
@@ -300,10 +301,11 @@ mod tests {
             selection.explicit_variations.get(b"wght").copied(),
             expected_weight
         );
-        let bytes =
-            std::fs::read(&actual_face.canonical_path).map_err(|error| error.to_string())?;
-        rustybuzz::ttf_parser::Face::parse(&bytes, actual_face.face_index)
-            .map_err(|error| format!("{error:?}"))?;
+        let bytes = std::fs::read(&actual_face.canonical_path)?;
+        assert!(
+            rustybuzz::ttf_parser::Face::parse(&bytes, actual_face.face_index).is_ok(),
+            "CoreText physical face does not parse"
+        );
         Ok(())
     }
 }

@@ -18,6 +18,8 @@ mod resolution;
 mod observer;
 
 pub(super) use observer::resolve_observer_face;
+#[cfg(test)]
+pub(super) use observer::verify_observer_face_after_initial_read;
 pub(super) use resolution::{FontResolutionCache, resolve_font_with_cache};
 
 #[cfg(target_os = "macos")]

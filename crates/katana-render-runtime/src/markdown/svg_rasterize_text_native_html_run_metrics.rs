@@ -81,3 +81,7 @@ fn append_native_metrics(
 #[cfg(test)]
 #[path = "svg_rasterize_text_native_html_run_metrics_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "svg_rasterize_text_native_html_run_feature_error_tests.rs"]
+mod feature_error_tests;

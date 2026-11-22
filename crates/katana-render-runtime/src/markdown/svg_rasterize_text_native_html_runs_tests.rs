@@ -1,8 +1,9 @@
 use super::test_support::{
-    FONT_SIZE, INTERMEDIATE_WEIGHT, regular_shape, roboto_flex, variable_face,
+    FONT_SIZE, INTERMEDIATE_WEIGHT, duplicate_width_face, regular_shape, roboto_flex, variable_face,
 };
 use super::{Arc, Database, ID, Memo, Run, RunFace, RunPlan, SelectionKey, SelectionQuery};
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
+use std::error::Error;
 
 #[test]
 fn unsupported_native_fallback_keeps_the_existing_cjk_run_and_memoizes_the_miss() {
@@ -28,8 +29,8 @@ fn unsupported_native_fallback_keeps_the_existing_cjk_run_and_memoizes_the_miss(
 }
 
 #[test]
-fn native_run_advance_uses_real_variable_face_variations() -> Result<(), String> {
-    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+fn native_run_advance_uses_real_variable_face_variations() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
     let fixture = roboto_flex(&directory)?;
     let plan = RunPlan {
         database: Arc::new(Database::new()),
@@ -41,5 +42,23 @@ fn native_run_advance_uses_real_variable_face_variations() -> Result<(), String>
     let advance =
         SvgRasterizeOps::with_html_font_render_scope(|| plan.advance(regular_shape(), None));
     assert!(advance.is_some_and(|value| value > 0.0));
+    Ok(())
+}
+
+#[test]
+fn native_run_advance_rejects_a_real_face_with_duplicate_variations() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let fixture = roboto_flex(&directory)?;
+    let plan = RunPlan {
+        database: Arc::new(Database::new()),
+        runs: vec![Run {
+            face: RunFace::Native(Arc::new(duplicate_width_face(&fixture))),
+            text: "A".into(),
+        }],
+    };
+    let advance =
+        SvgRasterizeOps::with_html_font_render_scope(|| plan.advance(regular_shape(), None));
+    assert_eq!(advance, None);
     Ok(())
 }

@@ -138,7 +138,7 @@ mod tests {
         let glyph = unsafe { font.glyph_with_name(&name) };
         (glyph != 0)
             .then_some(glyph)
-            .ok_or_else(|| format!("{FONT_NAME} lacks glyph {GLYPH_NAME}"))
+            .ok_or("Helvetica lacks glyph A".to_owned())
     }
 
     #[test]
@@ -147,9 +147,9 @@ mod tests {
         let glyph = real_glyph(&font)?;
 
         let path = outline(&font, glyph, FULL_UNITS_PER_EM)
-            .ok_or_else(|| format!("{FONT_NAME} {GLYPH_NAME} lacks outline"))?;
+            .ok_or("Helvetica A lacks outline".to_owned())?;
         let half_path = outline(&font, glyph, HALF_UNITS_PER_EM)
-            .ok_or_else(|| format!("{FONT_NAME} {GLYPH_NAME} lacks outline"))?;
+            .ok_or("Helvetica A lacks outline".to_owned())?;
 
         assert!(!path.is_empty());
         assert!(path.bounds().width() > 0.0);

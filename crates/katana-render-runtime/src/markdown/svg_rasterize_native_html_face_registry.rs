@@ -187,7 +187,7 @@ mod tests {
             .faces()
             .next()
             .cloned()
-            .ok_or_else(|| "system font database is empty".into())
+            .ok_or("system font database is empty".to_owned())
     }
 
     #[test]

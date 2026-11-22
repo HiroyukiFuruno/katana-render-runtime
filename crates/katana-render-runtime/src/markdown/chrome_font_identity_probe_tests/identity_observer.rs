@@ -1,7 +1,7 @@
 use super::{PhysicalFace, ResolvedFont, physical_file};
 use crate::markdown::chrome_font_identity_probe_tests::{ObserverFace, SelectedFont};
 use rustybuzz::ttf_parser::Face;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub(in crate::markdown::chrome_font_identity_probe_tests) fn resolve_observer_face(
     selected: &SelectedFont,
@@ -14,7 +14,7 @@ pub(in crate::markdown::chrome_font_identity_probe_tests) fn resolve_observer_fa
     let [observer] = matches.as_slice() else {
         return Err("Chrome retained font observation has no unique matching face".to_string());
     };
-    let identity = verified_observer_identity(observer)?;
+    let identity = verify_observer_face_after_initial_read(observer, &|_| {})?;
     Ok(ResolvedFont {
         identity,
         method: "Chrome retained font observation",
@@ -22,11 +22,15 @@ pub(in crate::markdown::chrome_font_identity_probe_tests) fn resolve_observer_fa
     })
 }
 
-fn verified_observer_identity(observer: &ObserverFace) -> Result<PhysicalFace, String> {
+pub(in crate::markdown::chrome_font_identity_probe_tests) fn verify_observer_face_after_initial_read(
+    observer: &ObserverFace,
+    after_initial_read: &dyn Fn(&Path),
+) -> Result<PhysicalFace, String> {
     let (path, bytes) = verified_observer_file(observer)?;
     /* WHY: 実描画時の名前はトレースで照合し、ここでは同じバイト列の面が読み取れることを再確認する。 */
     Face::parse(&bytes, observer.face_index)
         .map_err(|_| "Chrome retained font observation face index is invalid".to_string())?;
+    after_initial_read(&path);
     verified_observer_file(observer)
         .map_err(|_| "Chrome retained font observation changed before verification".to_string())?;
     Ok(PhysicalFace {

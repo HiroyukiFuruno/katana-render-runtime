@@ -1,6 +1,6 @@
 use super::{
-    CTFont, Database, Source, actual_font_metadata, mac_roman_name, matches, name_id,
-    postscript_name, same_file, ttf_parser, unique_name_table_index, unique_postscript_index,
+    CTFont, Database, Source, mac_roman_name, matches, name_id, postscript_name, same_file,
+    ttf_parser, unique_name_table_index, unique_postscript_index,
 };
 use core_foundation::base::TCFType;
 use core_graphics::{data_provider::CGDataProvider, font::CGFont};
@@ -85,11 +85,13 @@ fn bundled_font_postscript_identity_rejects_missing_name_and_truncated_font() ->
 
 #[test]
 fn duplicate_coretext_name_tables_do_not_identify_one_face() -> Result<(), String> {
-    let font = helvetica_coretext_font();
-    let metadata = actual_font_metadata(&font).ok_or("Helvetica physical metadata unavailable")?;
-    let bytes = std::fs::read(metadata.canonical_path).map_err(|error| error.to_string())?;
-    let collection = super::super::super::tests::duplicate_sfnt_as_two_face_ttc(&bytes)?;
-    assert_eq!(unique_name_table_index(&collection, &font), None);
+    let font = memory_font()?;
+    let borrowed = borrowed_font(&font);
+    assert_eq!(unique_name_table_index(FONT, borrowed), Some(0));
+    let collection = super::super::super::tests::duplicate_sfnt_as_two_face_ttc(FONT)?;
+    assert!(ttf_parser::Face::parse(&collection, 0).is_ok());
+    assert!(ttf_parser::Face::parse(&collection, 1).is_ok());
+    assert_eq!(unique_name_table_index(&collection, borrowed), None);
     Ok(())
 }
 
@@ -187,17 +189,25 @@ fn moved_font_symlink_stops_matching_the_old_coretext_file_path()
 
 #[test]
 fn coretext_font_from_memory_has_no_file_identity() -> Result<(), String> {
-    let provider = CGDataProvider::from_buffer(Arc::new(FONT.to_vec()));
-    let graphics_font =
-        CGFont::from_data_provider(provider).map_err(|_| "CGFont creation failed")?;
-    let font = new_from_CGFont(&graphics_font, FONT_SIZE);
-    /* WHY: 両クレートが参照する同一のCTFontを、所有者の生存中だけ借用する。 */
-    let borrowed = unsafe { &*font.as_concrete_TypeRef().cast::<CTFont>() };
+    let font = memory_font()?;
     let path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/NotoSans-Regular.ttf");
     assert!(path.is_file());
-    assert!(!same_file(borrowed, &path));
+    assert!(!same_file(borrowed_font(&font), &path));
     Ok(())
+}
+
+fn memory_font() -> Result<core_text::font::CTFont, &'static str> {
+    let provider = CGDataProvider::from_buffer(Arc::new(FONT.to_vec()));
+    let graphics_font = CGFont::from_data_provider(provider)
+        .ok()
+        .ok_or("CGFont creation failed")?;
+    Ok(new_from_CGFont(&graphics_font, FONT_SIZE))
+}
+
+fn borrowed_font(font: &core_text::font::CTFont) -> &CTFont {
+    /* WHY: 両クレートが参照する同一のCTFontを、所有者の生存中だけ借用する。 */
+    unsafe { &*font.as_concrete_TypeRef().cast::<CTFont>() }
 }
 
 #[test]
