@@ -60,7 +60,7 @@ def _payload(comment: object) -> dict[str, object] | None:
 
 
 def valid(comment: object, repository: str, number: int, base: str, head: str,
-          workflow_sha: str, owner: str, now: int) -> bool:
+          workflow_sha: str, owner: str, now: int, *, hosted_macos: str | None = None) -> bool:
     value = _payload(comment)
     if not isinstance(comment, dict) or value is None:
         return False
@@ -94,6 +94,8 @@ def valid(comment: object, repository: str, number: int, base: str, head: str,
                                   or not mac.is_sha256(value.get("eligibility_sha256"))))
             or value.get("platform") != "macos-arm64"
             or not valid_macos_version(value.get("os_version"))
+            or (hosted_macos is not None and not mac.macos_proof_matches_host(
+                value.get("os_version"), hosted_macos))
             or set(tools) != {"python", "scipy", "runtime_sha256"}
             or not isinstance(tools.get("python"), str)
             or not tools["python"]
@@ -116,7 +118,8 @@ def valid(comment: object, repository: str, number: int, base: str, head: str,
         return False
 
 
-def verify_from_api(repository: str, number: int, base: str, head: str) -> bool:
+def verify_from_api(repository: str, number: int, base: str, head: str, *,
+                    hosted_macos: str | None = None) -> bool:
     try:
         if not mac.workflow_scope_supported():
             return False
@@ -146,7 +149,7 @@ def verify_from_api(repository: str, number: int, base: str, head: str) -> bool:
                    and p.get("workflow_sha256") == workflow_sha and p.get("scope_sha256") == scope(workflow_sha)
                    and not mac.is_expired_receipt(item, p, now)]
         return len(current) == 1 and valid(current[0], repository, number, base, head,
-                                           workflow_sha, first[0], now)
+                                           workflow_sha, first[0], now, hosted_macos=hosted_macos)
     except (mac.EvidenceError, ValueError, TypeError, KeyError, OSError, RuntimeError,
             subprocess.SubprocessError):
         return False
@@ -236,13 +239,18 @@ def collect(repository: str, number: int, directory: Path,
     return projection
 
 
-def require_fresh_measurement_if_local_expired(jobs: list[dict[str, object]]) -> None:
+def ci_reused_local_evidence(jobs: list[dict[str, object]]) -> bool:
     paired = [job for job in jobs if job.get("name") == "Native paired HTML time and RSS nonregression"]
-    if len(paired) == 1:
-        steps = gate._objects(paired[0].get("steps", []), "paired job steps")
-        reused = [step for step in steps if step.get("name") == "Report local HTML performance evidence"
-                  and step.get("conclusion") == "success"]
-        gate.require(not reused, "local HTML performance evidence expired or changed; rerun the required CI job for fresh measurement")
+    if len(paired) != 1:
+        return False
+    steps = gate._objects(paired[0].get("steps", []), "paired job steps")
+    return any(step.get("name") == "Report local HTML performance evidence"
+               and step.get("conclusion") == "success" for step in steps)
+
+
+def require_fresh_measurement_if_local_expired(jobs: list[dict[str, object]]) -> None:
+    gate.require(not ci_reused_local_evidence(jobs),
+                 "local HTML performance evidence expired or changed; rerun the required CI job for fresh measurement")
 
 
 def main() -> int:
@@ -262,7 +270,9 @@ def main() -> int:
         if args.verify:
             if args.publish or args.bundle or args.reuse_request or not args.base or not args.head:
                 raise mac.EvidenceError("invalid verification arguments")
-            accepted = verify_from_api(args.repository, args.pr, args.base, args.head)
+            accepted = (platform.system() == "Darwin" and platform.machine() == "arm64"
+                        and verify_from_api(args.repository, args.pr, args.base, args.head,
+                                            hosted_macos=mac.macos_product_version()))
             mac.output_reuse(accepted, __import__("os").environ.get("GITHUB_OUTPUT"))
             return 0
         if args.bundle is None:

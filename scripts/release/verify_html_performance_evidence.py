@@ -4397,9 +4397,10 @@ def acquire(directory: Path, root: Path, repository: str, current_producer: bool
         return latest_acquisition_generation(rows)
     if current_producer:
         require(current_latest() == run, "current producer is not latest exact-PR CI generation")
-        from local_html_performance_evidence import verify_from_api
-        if verify_from_api(repository, _integer(pull["number"], "PR number"),
-                           _text(pull_base["sha"], "PR base"), head):
+        from local_html_performance_evidence import ci_reused_local_evidence, verify_from_api
+        if ci_reused_local_evidence(job_rows) and verify_from_api(
+                repository, _integer(pull["number"], "PR number"),
+                _text(pull_base["sha"], "PR base"), head):
             require(current_latest() == run, "current producer generation changed")
             directory.mkdir(parents=True)
             (directory / "acquisition.json").write_text(json.dumps({
@@ -4410,11 +4411,12 @@ def acquire(directory: Path, root: Path, repository: str, current_producer: bool
                     "memoryPolicyVersion": "html-memory-v5"}
     elif (pr_binding := _completed_pr_binding(run, repository, head)) is not None:
         number, base = pr_binding
-        from local_html_performance_evidence import verify_from_api
-        if verify_from_api(repository, number, base, head):
-            run_id = _integer(run.get("id"), "CI run id")
-            attempt = _integer(run.get("run_attempt"), "CI attempt")
-            _require_acquisition_jobs(api(f"repos/{repository}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100"), run_id)
+        from local_html_performance_evidence import ci_reused_local_evidence, verify_from_api
+        run_id = _integer(run.get("id"), "CI run id")
+        attempt = _integer(run.get("run_attempt"), "CI attempt")
+        completed_jobs = _require_acquisition_jobs(
+            api(f"repos/{repository}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100"), run_id)
+        if ci_reused_local_evidence(completed_jobs) and verify_from_api(repository, number, base, head):
             latest = api(f"repos/{repository}/actions/runs/{run_id}")
             require(current_latest() == run and all(latest.get(key) == run.get(key) for key in
                     ("id", "head_sha", "run_attempt", "status", "conclusion", "event", "pull_requests")),

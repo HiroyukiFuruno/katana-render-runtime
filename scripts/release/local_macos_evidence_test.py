@@ -1355,9 +1355,15 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             patch.object(EVIDENCE, "macos_product_version", return_value="14.7.8"),
             patch.object(EVIDENCE.subprocess, "run") as run,
         ):
-            with self.assertRaisesRegex(EVIDENCE.EvidenceError, "requires macOS 27"):
+            with self.assertRaisesRegex(EVIDENCE.EvidenceError, "requires macOS 26 or 27"):
                 EVIDENCE.collect(REPOSITORY, 7, publish=False)
         run.assert_not_called()
+
+    def test_local_proof_version_can_be_same_or_one_major_newer_than_runner(self) -> None:
+        self.assertTrue(EVIDENCE.macos_proof_matches_host("26.6.1", "26.5.0"))
+        self.assertTrue(EVIDENCE.macos_proof_matches_host("27.2.1", "26.6.1"))
+        self.assertFalse(EVIDENCE.macos_proof_matches_host("28.0.0", "26.6.1"))
+        self.assertFalse(EVIDENCE.macos_proof_matches_host("25.0.0", "26.6.1"))
 
     def test_rejects_git_assume_unchanged_and_skip_worktree_index_flags(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

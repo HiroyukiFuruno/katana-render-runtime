@@ -37,7 +37,7 @@ else:
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/test-and-build.yml"
-SUPPORTED_WORKFLOW_SHA256 = "698da7536b76a695e9b17246e4b3eff11d9d71353f18c9e8bcef9ca0c7334ae3"
+SUPPORTED_WORKFLOW_SHA256 = "7c2898104574724e694c99613c8f85d3e95bddddfd877ecadfc04ac0ff706d38"
 SCHEMA = 1
 FRESHNESS_SECONDS = 24 * 60 * 60
 MARKER = "<!-- krr-local-macos-evidence:v1 -->"
@@ -422,8 +422,28 @@ def macos_product_version() -> str:
     return version
 
 
-def is_macos_27(value: Any) -> bool:
-    return isinstance(value, str) and re.fullmatch(r"27\.\d+(?:\.\d+)?", value.strip()) is not None
+def is_supported_macos(value: Any) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"(?:26|27)\.\d+(?:\.\d+)?", value.strip()) is not None
+
+
+def macos_major(value: object) -> int | None:
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r"([0-9]+)\.[0-9]+(?:\.[0-9]+)?", value.strip())
+    return int(match.group(1)) if match is not None else None
+
+
+def macos_proof_matches_host(proof_version: object, host_version: object) -> bool:
+    proof_major, host_major = macos_major(proof_version), macos_major(host_version)
+    return proof_major is not None and host_major is not None and proof_major in {host_major, host_major + 1}
+
+
+def macos_bottle_tag(value: str) -> str:
+    tags = {"26": "arm64_tahoe", "27": "arm64_golden_gate"}
+    try:
+        return tags[str(macos_major(value))]
+    except KeyError as exc:
+        raise EvidenceError("local proof requires macOS 26 or 27") from exc
 
 
 def java_home_from_settings(output: str) -> str:
@@ -1210,8 +1230,8 @@ def tool_versions(
         raise EvidenceError("local proof requires Apple Silicon (arm64)")
     if platform.system() != "Darwin":
         raise EvidenceError("local proof requires macOS")
-    if not is_macos_27(found["macos"]):
-        raise EvidenceError("local proof requires macOS 27, matching the hosted macOS runner")
+    if not is_supported_macos(found["macos"]):
+        raise EvidenceError("local proof requires macOS 26 or 27, matching the hosted macOS runner")
     assert_command_binding(binding, just_binding)
     rust_verbose = subprocess.run(
         ("rustc", "-vV"), cwd=ROOT, env=environment,
@@ -1248,7 +1268,7 @@ def validate_pinned_tools(versions: Any) -> None:
         "command_binding", "graphviz",
     }:
         raise EvidenceError("local proof tool inventory is incomplete or unsupported")
-    if (not is_macos_27(versions.get("macos")) or versions.get("architecture") != "arm64"
+    if (not is_supported_macos(versions.get("macos")) or versions.get("architecture") != "arm64"
             or versions.get("rust_host") != SCOPE_PARAMETERS["CARGO_BUILD_TARGET"]):
         raise EvidenceError("local proof host does not match the Apple Silicon CI platform")
     if not java_is_21(versions.get("java")):
@@ -1314,7 +1334,7 @@ def validate_pinned_tools(versions: Any) -> None:
     identities = host_tools.get("identities")
     formulae = identities.get("graphviz") if isinstance(identities, dict) else None
     java_identity = identities.get("java") if isinstance(identities, dict) else None
-    expected_tag = "arm64_golden_gate"
+    expected_tag = macos_bottle_tag(str(versions.get("macos", "")))
     if (set(host_tools) != {
             "policy", "identities", "graphviz_inventory_sha256", "java_inventory_sha256", "dot_path",
     }
@@ -1741,7 +1761,7 @@ def valid_payload(
         return False
     if not Path(tools["java_home"]).is_absolute():
         return False
-    if (tools.get("architecture") != "arm64" or not is_macos_27(tools.get("macos"))
+    if (tools.get("architecture") != "arm64" or not is_supported_macos(tools.get("macos"))
             or tools.get("rust_host") != SCOPE_PARAMETERS["CARGO_BUILD_TARGET"]):
         return False
     if (not java_is_21(tools.get("java")) or tools.get("java_vendor") != JAVA_VENDOR
@@ -1864,6 +1884,7 @@ def verify_from_api(
     repository: str, number: int, *, expected_base: str | None = None, expected_head: str | None = None,
     fetch: Callable[[str], Any] | None = None, now: int | None = None,
     expected_workflow_digest: str | None = None,
+    runner_macos_version: str | None = None,
 ) -> bool:
     """Read PR/comments twice; all failures mean hosted CI should run."""
     try:
@@ -1945,6 +1966,9 @@ def verify_from_api(
         macos_version = candidate_payload["tools"].get("macos")
         if not isinstance(macos_version, str):
             return False
+        if runner_macos_version is not None:
+            if not is_supported_macos(runner_macos_version) or not macos_proof_matches_host(macos_version, runner_macos_version):
+                return False
         stable_versions = fetch_stable_manifest_versions()
         rust_proof = fetch_official_rust_component_proof()
         host_tool_proof = fetch_official_host_tool_proof(macos_version)
@@ -1981,8 +2005,8 @@ def output_reuse(value: bool, output_path: str | None) -> None:
 def collect(repository: str, number: int, publish: bool) -> int:
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise EvidenceError("local collection requires macOS Apple Silicon")
-    if not is_macos_27(macos_product_version()):
-        raise EvidenceError("local collection requires macOS 27, matching the hosted macOS runner")
+    if not is_supported_macos(macos_product_version()):
+        raise EvidenceError("local collection requires macOS 26 or 27, matching the hosted macOS runner")
     require_standard_index_flags()
     if git_status():
         raise EvidenceError("working tree must be clean before collection")
@@ -2189,6 +2213,7 @@ def main() -> int:
                 and verify_from_api(
                     args.repo, args.pr, expected_base=args.base, expected_head=args.head,
                     expected_workflow_digest=workflow_digest(workflow_path),
+                    runner_macos_version=macos_product_version(),
                 )
             )
             if valid and args.output:

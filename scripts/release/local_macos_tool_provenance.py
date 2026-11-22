@@ -473,9 +473,9 @@ def fetch_official_host_tool_proof(
     macos_version: str, *, fetch_json: Callable[[str], Any] | None = None,
     fetch_archive: Callable[[str], bytes] | None = None,
 ) -> HostToolProof:
-    if not isinstance(macos_version, str) or re.fullmatch(r"27(?:\.\d+){1,2}", macos_version) is None:
+    if not isinstance(macos_version, str) or re.fullmatch(r"(?:26|27)(?:\.\d+){1,2}", macos_version) is None:
         raise ProvenanceError("native tool evidence requires a supported macOS release")
-    tag = "arm64_golden_gate"
+    tag = {"26": "arm64_tahoe", "27": "arm64_golden_gate"}[macos_version.split(".", 1)[0]]
     read_json = fetch_json or fetch_official_json
     read_archive = fetch_archive or fetch_official_archive
     identities: dict[str, Any] = {"graphviz": [], "java": {}, "host_tcb": HOST_TCB_POLICY}

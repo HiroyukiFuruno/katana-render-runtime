@@ -159,7 +159,7 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
         cls.steps = workflow_steps(cls.test_job)
 
     def test_reuse_guard_truth_table_uses_actual_step_expressions(self) -> None:
-        matrix = (("linux64", "ubuntu-latest"), ("mac-arm64", "xcode-27"), ("win64", "windows-latest"))
+        matrix = (("linux64", "ubuntu-latest"), ("mac-arm64", "macos-latest"), ("win64", "windows-latest"))
         proof_states = (
             ("success", "true", True),
             ("success", "false", False),
@@ -176,7 +176,7 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
             } or step.get("uses", "").startswith("actions/checkout@"):
                 continue
             expression = step.get("if", "true")
-            baseline = eval_step_if(expression, "mac-arm64", "xcode-27", "failure", "false")
+            baseline = eval_step_if(expression, "mac-arm64", "macos-latest", "failure", "false")
             if not baseline:
                 continue
             with self.subTest(step=name or step):
@@ -203,7 +203,7 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
                 "&& steps.mac_proof.outcome == 'success' "
                 "&& steps.mac_proof.outputs.reuse == 'true'",
                 "mac-arm64",
-                "xcode-27",
+                "macos-latest",
                 "success",
                 "true",
             )
@@ -215,7 +215,7 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
             "&& steps.native_coverage_cache_verify.outputs.verified == '' "
             "&& steps.coverage.outcome == 'skipped'"
         )
-        for platform, os_name in (("mac-arm64", "xcode-27"), ("win64", "windows-latest")):
+        for platform, os_name in (("mac-arm64", "macos-latest"), ("win64", "windows-latest")):
             with self.subTest(platform=platform):
                 self.assertTrue(
                     eval_step_if(skipped_linux_only_steps, platform, os_name, "skipped", "")
@@ -249,7 +249,7 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
             )
         )
         with self.assertRaisesRegex(AssertionError, "unmodeled context path"):
-            eval_step_if("steps.future_step.outcome == 'success'", "mac-arm64", "xcode-27", "failure", "false")
+            eval_step_if("steps.future_step.outcome == 'success'", "mac-arm64", "macos-latest", "failure", "false")
 
     def test_mac_quality_steps_exactly_cover_the_evidence_command_map(self) -> None:
         mac_applicable_names = {
@@ -257,7 +257,7 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
             for step in self.steps
             if step.get("name")
             and any(
-                eval_step_if(step.get("if", "true"), "mac-arm64", "xcode-27", outcome, reuse)
+                eval_step_if(step.get("if", "true"), "mac-arm64", "macos-latest", outcome, reuse)
                 for outcome, reuse in (("failure", "false"), ("success", "true"))
             )
         }
@@ -287,7 +287,7 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
         for platform, os_name, phase, expected_final, expected_interim in (
             ("linux64", "ubuntu-latest", "final", True, False),
             ("linux64", "ubuntu-latest", "interim", False, True),
-            ("mac-arm64", "xcode-27", "final", False, False),
+            ("mac-arm64", "macos-latest", "final", False, False),
             ("win64", "windows-latest", "interim", False, False),
         ):
             with self.subTest(platform=platform, phase=phase):
@@ -315,7 +315,7 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
             "python -m unittest discover -s scripts/hooks -p local_review_windows_job_test.py -v",
         )
         self.assertTrue(eval_step_if(step["if"], "win64", "windows-latest", "failure", "false"))
-        self.assertFalse(eval_step_if(step["if"], "mac-arm64", "xcode-27", "failure", "false"))
+        self.assertFalse(eval_step_if(step["if"], "mac-arm64", "macos-latest", "failure", "false"))
 
     def test_unknown_mac_quality_step_disables_evidence_scope_reuse(self) -> None:
         self.assertTrue(EVIDENCE.workflow_scope_supported(CI_PATH))
@@ -394,7 +394,7 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
             for outcome, reuse in (("success", "true"), ("failure", "false")):
                 with self.subTest(step=step.get("name", step), outcome=outcome):
                     self.assertTrue(
-                        eval_step_if(step.get("if", "true"), "mac-arm64", "xcode-27", outcome, reuse)
+                        eval_step_if(step.get("if", "true"), "mac-arm64", "macos-latest", outcome, reuse)
                     )
         for event, draft, expected in (
             ("pull_request", True, False),
@@ -507,7 +507,7 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("continue-on-error", install)
         for platform, os_name, expected in (
             ("linux64", "ubuntu-latest", True),
-            ("mac-arm64", "xcode-27", False),
+            ("mac-arm64", "macos-latest", False),
             ("win64", "windows-latest", False),
         ):
             for outcome, reuse in (("success", "true"), ("failure", "false")):
@@ -521,7 +521,7 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
     def test_required_matrix_and_draft_job_gate_remain_intact(self) -> None:
         for entry in (
             "- os: ubuntu-latest\n            platform: linux64\n            check_name: ubuntu-latest, linux64",
-            "- os: xcode-27\n            platform: mac-arm64\n            check_name: mac-arm64",
+            "- os: macos-latest\n            platform: mac-arm64\n            check_name: mac-arm64",
             "- os: windows-latest\n            platform: win64\n            check_name: windows-latest, win64",
         ):
             self.assertIn(entry, self.workflow)

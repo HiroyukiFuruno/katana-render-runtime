@@ -96,7 +96,7 @@ def formula(name: str, bottle: bytes, dependencies: list[str]) -> dict[str, obje
         "bottle": {"stable": {"root_url": "https://ghcr.io/v2/homebrew/core", "files": {
             tag: {"cellar": PROVENANCE.CELLAR, "sha256": sha,
                   "url": f"https://ghcr.io/v2/homebrew/core/{name.replace('@', '/')}/blobs/sha256:{sha}"}
-            for tag in ("arm64_golden_gate",)
+            for tag in ("arm64_tahoe", "arm64_golden_gate")
         }}},
     }
 
@@ -143,8 +143,9 @@ class OfficialFixture:
         if url == self.java_url:
             return self.java_archive
         for name, value in self.formulas.items():
-            if url == fixture_object(bottle_files(value)["arm64_golden_gate"])["url"]:
-                return self.bottles[name]
+            for tag in ("arm64_tahoe", "arm64_golden_gate"):
+                if url == fixture_object(bottle_files(value)[tag])["url"]:
+                    return self.bottles[name]
         raise AssertionError(f"unexpected official archive: {url}")
 
     def proof(self, version: object = "27.2.1") -> HostToolProof:
@@ -214,16 +215,18 @@ class ToolProvenanceTest(unittest.TestCase):
         self.assertIn("/openssl/3/", identity["url"])
 
     def test_supported_os_selects_native_bottle_and_unknown_os_declines(self) -> None:
-        proof = OfficialFixture().proof("27.2.1")
-        self.assertTrue(all(value["bottle_tag"] == "arm64_golden_gate" for value in proof.identities["graphviz"]))
-        for version in ("14.7", "26.0", "27", "15;evil", "", None):
-            with self.subTest(version=version), self.assertRaises(PROVENANCE.ProvenanceError):
-                OfficialFixture().proof(version)
+        for version, tag in (("26.0", "arm64_tahoe"), ("27.2.1", "arm64_golden_gate")):
+            proof = OfficialFixture().proof(version)
+            self.assertTrue(all(value["bottle_tag"] == tag for value in proof.identities["graphviz"]))
+        for unsupported in ("14.7", "27", "15;evil", "", None):
+            with self.subTest(version=unsupported), self.assertRaises(PROVENANCE.ProvenanceError):
+                OfficialFixture().proof(unsupported)
 
     def test_official_all_bottle_is_supported_but_linux_only_is_not(self) -> None:
         value = formula("certificates", b"official certificates", [])
         files = bottle_files(value)
         files["all"] = files.pop("arm64_golden_gate")
+        files.pop("arm64_tahoe")
         identity, _ = PROVENANCE._formula(value, "certificates", "arm64_golden_gate")
         self.assertEqual(identity["bottle_tag"], "all")
         files["arm64_linux"] = files.pop("all")

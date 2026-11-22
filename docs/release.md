@@ -34,7 +34,7 @@ GitHub のブランチ保護（branch protection）では、少なくとも次�
 - `Test and Build (windows-latest, win64)`
 - `preflight`
 
-macOSは27系のApple Siliconを対象とする。CIでは `xcode-27` を使う。同じPR・ベース・候補コミットのローカル証跡が検証を通過した場合、CIは該当するmacOS検査を省略する。証跡が有効でない場合はCIで検査する。
+macOSのCIではApple Siliconの `macos-latest` を使う。ローカルのmacOSがCIと同じメジャーか1つ先で、同じPR・ベース・候補コミットの証跡が検証を通過した場合、CIは該当するmacOS検査を省略できる。証跡が有効でない場合はCIで検査する。
 
 ## リリース前検査
 

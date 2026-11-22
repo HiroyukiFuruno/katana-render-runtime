@@ -4964,6 +4964,9 @@ class PerformanceAcquisitionTest(unittest.TestCase):
                 if case in {"producer_skipped_dependency", "producer_local_skipped_dependency",
                             "manual_local_skipped_dependency"}:
                     jobs[-1]["conclusion"] = "skipped"
+                if case in {"producer_local_success", "manual_local_success"}:
+                    jobs[-1]["steps"] = [{"name": "Report local HTML performance evidence",
+                                          "conclusion": "success"}]
                 payload = {"total_count": len(jobs), "jobs": jobs}
             elif path.endswith("/artifacts?per_page=100"):
                 payload = {"total_count": 1, "artifacts": [artifact]}
@@ -5053,6 +5056,10 @@ class PerformanceAcquisitionTest(unittest.TestCase):
         self.assertEqual(gate.read_json(self.destination / "acquisition.json")["kind"],
                          "owner-local-html-performance")
         self.assertFalse(any(path.endswith("/artifacts?per_page=100") for path in self.calls))
+
+    def test_current_producer_prefers_ci_artifact_when_ci_did_not_reuse_local_evidence(self) -> None:
+        self.acquire_case("producer_local_not_used")
+        self.assertTrue(any(path.endswith("/artifacts?per_page=100") for path in self.calls))
 
     def test_completed_pr_can_use_verified_local_evidence(self) -> None:
         self.acquire_case("manual_local_success")

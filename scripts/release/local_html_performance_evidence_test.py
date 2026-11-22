@@ -71,6 +71,14 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "platform differs"):
                 proof.require_measurement_host(Path("/unused"), "other")
 
+    def test_ci_accepts_local_version_at_most_one_major_ahead(self) -> None:
+        for host, accepted in (("26.4", True), ("27.0.1", True), ("25.5", False),
+                               ("28.0", False), ("unknown", False)):
+            with self.subTest(host=host):
+                self.assertEqual(proof.valid(self.comment, "owner/repo", 3, "b" * 40,
+                                            "c" * 40, self.workflow, "owner", self.now,
+                                            hosted_macos=host), accepted)
+
     def test_owner_api_double_read_rejects_duplicates_and_changes(self) -> None:
         owner = "owner"
         with patch.object(mac, "workflow_scope_supported", return_value=True), \

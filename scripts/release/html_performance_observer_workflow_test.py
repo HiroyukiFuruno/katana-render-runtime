@@ -47,7 +47,7 @@ class ObserverWorkflowTest(unittest.TestCase):
         self.assertIn('just html-performance-catalog-captures "$output_root" \'\' \'\'', capture_text)
         self.assertIn('${{ steps.font_observer.outputs.executable }}', capture_text)
         self.assertIn("031c93c5e822ffd8d22121bb41ed139fb6fcc4e96f6aa1f43ea31ec36fb9242c true", capture_text)
-        self.assertIn("runs-on: xcode-27", job)
+        self.assertIn("runs-on: macos-latest", job)
         self.assertIn("needs: test", job)
         self.assertIn("actions: read", job)
         self.assertIn("contents: read", job)

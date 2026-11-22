@@ -415,7 +415,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("shared-key: ci-v2-${{ matrix.os }}-stable-default", cache)
         for platform in ("linux64", "mac-arm64", "win64"):
             self.assertIn(f"platform: {platform}", self.ci)
-        self.assertIn("- os: xcode-27\n            platform: mac-arm64", self.ci)
+        self.assertIn("- os: macos-latest\n            platform: mac-arm64", self.ci)
         self.assertNotIn("platform: mac-x64", self.ci)
         self.assertNotIn("os: macos-15-intel", self.ci)
         self.assertNotRegex(self.ci, r"rm\s+-rf\s+(?:\S*/)?target(?:/|\s|$)")

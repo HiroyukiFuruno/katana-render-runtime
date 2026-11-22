@@ -95,7 +95,7 @@ jobs:
           - os: ubuntu-latest
             platform: linux64
             check_name: ubuntu-latest, linux64
-          - os: xcode-27
+          - os: macos-latest
             platform: mac-arm64
             check_name: mac-arm64
           - os: windows-latest
@@ -694,7 +694,7 @@ jobs:
     needs: test
     if: >-
       github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    runs-on: xcode-27
+    runs-on: macos-latest
     timeout-minutes: 360
     permissions:
       actions: read
