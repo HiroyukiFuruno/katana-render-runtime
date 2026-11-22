@@ -310,6 +310,27 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn variable_font_markup_serializes_settings_escapes_xml_and_skips_invalid_tags() {
+        let run = HtmlPaintFontRun {
+            family: "Face & <tag>".to_string(),
+            text: "x".to_string(),
+            variations: vec![
+                resvg::usvg::FontVariation::new(*b"wght", 650.0),
+                resvg::usvg::FontVariation::new(*b"wdth", 80.0),
+                resvg::usvg::FontVariation::new([0xff, 0xfe, 0xfd, 0xfc], 1.0),
+            ],
+        };
+
+        let markup = super::resolved_run_markup(&run);
+
+        assert_eq!(
+            markup,
+            "font-family=\"&quot;Face &amp; &lt;tag&gt;&quot;\" font-optical-sizing=\"none\" \
+             font-variation-settings=\"&quot;wght&quot; 650, &quot;wdth&quot; 80\""
+        );
+    }
+
     fn serialized_family_attribute(family: &str) -> Result<String, std::fmt::Error> {
         let mut serialized = String::new();
         cssparser::serialize_string(family, &mut serialized)?;
