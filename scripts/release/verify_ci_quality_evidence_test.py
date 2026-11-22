@@ -883,6 +883,7 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
         self.assertIn("run_attempt", capture_step)
         self.assertIn("tmp/html-performance-stage90/", capture_step)
         self.assertIn('just html-performance-catalog-captures "$output_root"', capture_step)
+        self.assertNotIn("catalog-stage90-diagnostic-captures", capture_step)
         self.assertGreater(
             capture_step.index("just html-performance-catalog-captures"),
             capture_step.index("output_root="),
@@ -904,9 +905,14 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
             workflow.index("Capture all 84 HTML catalog conditions"),
             workflow.index("Measure all 84 catalog conditions against baseline"),
         )
-        self.assertIn(
-            "html-performance-catalog-captures output_root prior_observation='' prior_finalized='' chrome_executable='' chrome_sha256='' font_observer='false':",
-            justfile,
+        recipe_header = next(
+            line for line in justfile.splitlines()
+            if line.startswith("html-performance-catalog-captures ")
+        )
+        self.assertEqual(
+            recipe_header,
+            "html-performance-catalog-captures output_root prior_observation='' prior_finalized='' "
+            "chrome_executable='' chrome_sha256='' font_observer='false' diagnostic_conditions='':",
         )
         self.assertIn('capture_args+=("$prior_observation" "$prior_finalized")', justfile)
         self.assertIn("catalog-stage90-plan", justfile)
