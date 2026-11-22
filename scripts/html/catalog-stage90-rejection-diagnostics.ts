@@ -64,6 +64,8 @@ const DIAGNOSTIC_MARKERS = [
   ["Operation evidence does not prove", "krr-operation-evidence"],
   ["actual font audit is incomplete", "krr-font-audit-incomplete"],
   ["no exact physical face matched the CDP PostScript name", "font-probe-no-physical-face"],
+  ["no exact URL-bound CoreText descriptor matched", "font-probe-no-coretext-match"],
+  ["multiple URL-bound CoreText physical face matches", "font-probe-ambiguous-coretext-face"],
   ["CoreText URL descriptors expose no collection index", "font-probe-collection-index"],
   ["CoreText URL descriptors cannot prove nonzero face index", "font-probe-collection-index"],
   ["Chrome and KRR state differ after font provenance resolution", "chrome-krr-state-mismatch"],
@@ -72,9 +74,27 @@ const DIAGNOSTIC_MARKERS = [
   ["applied design coordinates differ", "chrome-krr-design-coordinate-mismatch"],
 ] as const;
 
+const FONT_RECONCILIATION_REJECTION_STAGES = [
+  "krr-observation-unknown",
+  "font-reconciliation-request-binding",
+  "font-reconciliation-resource-inventory",
+  "font-reconciliation-selected-fonts",
+  "font-reconciliation-probe-unresolved",
+  "font-reconciliation-probe-result",
+  "font-reconciliation-resource-digest",
+  "font-reconciliation-provenance",
+  "font-reconciliation-krr-receipt",
+  "font-reconciliation-chrome-receipt",
+  "font-reconciliation-state",
+] as const;
+
+export type FontReconciliationRejectionStage =
+  (typeof FONT_RECONCILIATION_REJECTION_STAGES)[number];
+
 type FailureDetail =
   | (typeof DIAGNOSTIC_MARKERS)[number][1]
-  | (typeof OBSERVER_SCALER_REJECTION_CODES)[number];
+  | (typeof OBSERVER_SCALER_REJECTION_CODES)[number]
+  | FontReconciliationRejectionStage;
 
 interface Diagnosis {
   conditionId: string;
@@ -133,7 +153,8 @@ function failureDetail(row: JsonRecord): FailureDetail | undefined {
     OBSERVER_SCALER_REJECTION_CODES.find((token) =>
       reports.some((report) => report.includes(token)),
     ) ??
-    DIAGNOSTIC_MARKERS.find(([marker]) => reports.some((report) => report.includes(marker)))?.[1]
+    DIAGNOSTIC_MARKERS.find(([marker]) => reports.some((report) => report.includes(marker)))?.[1] ??
+    FONT_RECONCILIATION_REJECTION_STAGES.find((stage) => row.fontIdentityFailureStage === stage)
   );
 }
 

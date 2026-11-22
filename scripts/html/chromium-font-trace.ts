@@ -135,7 +135,17 @@ export const OBSERVER_SCALER_REJECTION_CODES = [
   "observer-scaler-unavailable-absolute-file",
   "observer-scaler-file-read-failed",
   "observer-scaler-file-digest-mismatch",
-  "observer-scaler-variation-mismatch",
+  "observer-scaler-static-fvar-inconsistent",
+  "observer-scaler-fvar-inventory-unavailable",
+  "observer-scaler-skia-position-unavailable",
+  "observer-scaler-axis-count-mismatch",
+  "observer-scaler-coordinate-length-mismatch",
+  "observer-scaler-invalid-axis",
+  "observer-scaler-duplicate-axis",
+  "observer-scaler-missing-coordinate",
+  "observer-scaler-excess-coordinate",
+  "observer-scaler-duplicate-coordinate",
+  "observer-scaler-out-of-range-coordinate",
 ] as const;
 
 type ScalerRejectionToken = (typeof OBSERVER_SCALER_REJECTION_CODES)[number];
@@ -166,43 +176,65 @@ function validateStatic(
   );
 }
 
-function validateVariable(
-  actual: z.infer<typeof actualFontSchema>,
+type ValidatedVariation = { axes: FontAxis[]; coordinates: FontCoordinate[] };
+
+function validateVariablePosition(
   position: z.infer<typeof variationPositionSchema>,
-): { axes: FontAxis[]; coordinates: FontCoordinate[] } | undefined {
-  if (
-    actual.physicalFaceFvarTablePresent !== true ||
-    actual.axisInventoryAvailable !== true ||
-    position.available !== true ||
-    position.axisCount !== actual.axes.length ||
-    position.coordinates === undefined ||
-    position.coordinates.length !== actual.axes.length
-  )
-    return undefined;
-  const axesValue = actual.axes;
-  const coordinatesValue = position.coordinates;
+  axisCount: number,
+): FontCoordinate[] | ScalerRejectionToken {
+  if (position.available !== true) return "observer-scaler-skia-position-unavailable";
+  if (position.axisCount !== axisCount) return "observer-scaler-axis-count-mismatch";
+  if (position.coordinates === undefined) return "observer-scaler-coordinate-length-mismatch";
+  if (position.coordinates.length < axisCount) return "observer-scaler-missing-coordinate";
+  if (position.coordinates.length > axisCount) return "observer-scaler-excess-coordinate";
+  return position.coordinates;
+}
+
+function validateVariableAxes(axesValue: readonly FontAxis[]): FontAxis[] | ScalerRejectionToken {
   const ids = new Set<number>();
   const axes: FontAxis[] = [];
   for (const axis of axesValue) {
-    if (axis.minimum > axis.maximum || ids.has(axis.identifier)) return undefined;
+    if (axis.minimum > axis.maximum) return "observer-scaler-invalid-axis";
+    if (ids.has(axis.identifier)) return "observer-scaler-duplicate-axis";
     ids.add(axis.identifier);
     axes.push(axis);
   }
+  return axes;
+}
+
+function validateVariableCoordinates(
+  axes: readonly FontAxis[],
+  coordinatesValue: readonly FontCoordinate[],
+): FontCoordinate[] | ScalerRejectionToken {
   const seen = new Set<number>();
   const coordinates: FontCoordinate[] = [];
   for (const coordinate of coordinatesValue) {
     const axis = axes.find((item) => item.identifier === coordinate.identifier);
-    if (
-      axis === undefined ||
-      seen.has(coordinate.identifier) ||
-      coordinate.value < axis.minimum ||
-      coordinate.value > axis.maximum
-    )
-      return undefined;
+    if (axis === undefined) return "observer-scaler-excess-coordinate";
+    if (seen.has(coordinate.identifier)) return "observer-scaler-duplicate-coordinate";
+    if (coordinate.value < axis.minimum || coordinate.value > axis.maximum)
+      return "observer-scaler-out-of-range-coordinate";
     seen.add(coordinate.identifier);
     coordinates.push(coordinate);
   }
-  return seen.size === ids.size ? { axes, coordinates } : undefined;
+  return seen.size === axes.length ? coordinates : "observer-scaler-missing-coordinate";
+}
+
+function validateVariable(
+  actual: z.infer<typeof actualFontSchema>,
+  position: z.infer<typeof variationPositionSchema>,
+): ValidatedVariation | ScalerRejectionToken {
+  if (actual.physicalFaceFvarTablePresent !== true)
+    return "observer-scaler-static-fvar-inconsistent";
+  if (actual.axisInventoryAvailable !== true) return "observer-scaler-fvar-inventory-unavailable";
+  const coordinates = validateVariablePosition(position, actual.axes.length);
+  if (typeof coordinates === "string") return coordinates;
+  const axes = validateVariableAxes(actual.axes);
+  if (typeof axes === "string") return axes;
+  const validatedCoordinates = validateVariableCoordinates(axes, coordinates);
+  return typeof validatedCoordinates === "string"
+    ? validatedCoordinates
+    : { axes, coordinates: validatedCoordinates };
 }
 
 function hasMissingDescriptorPath(actual: unknown): boolean {
@@ -253,7 +285,7 @@ function parseFontIdentity(args: EventArgs): ParsedFontIdentity {
   let coordinates: FontCoordinate[] = [];
   if (!validateStatic(actual, position)) {
     const variable = validateVariable(actual, position);
-    if (variable === undefined) return { rejection: "observer-scaler-variation-mismatch" };
+    if (typeof variable === "string") return { rejection: variable };
     axes = variable.axes;
     coordinates = variable.coordinates;
   }

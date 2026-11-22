@@ -258,19 +258,34 @@ test("used scaler rejections are granular and redact trace values", () => {
         ...args,
         actualFont: JSON.stringify(mutation(JSON.parse(args.actualFont as string))),
       }));
-    const variableMismatch = mutateActual(valid, (actual) => ({
-      ...actual,
-      physicalFaceFvarTablePresent: true,
-      axisInventoryAvailable: true,
-      axes: [
-        { identifier: 1196445523, minimum: 100, maximum: 900 },
-        { identifier: 1196445523, minimum: 100, maximum: 900 },
-      ],
-    }));
-    const invalidVariation = mutateScaler(valid, (args) => ({
-      ...args,
-      skiaVariationPosition: "not-json",
-    }));
+    const axis = { identifier: 1196445523, minimum: 100, maximum: 900 };
+    const coordinate = { identifier: axis.identifier, value: 700 };
+    const variable = mutateScaler(
+      mutateActual(valid, (actual) => ({
+        ...actual,
+        physicalFaceFvarTablePresent: true,
+        axisInventoryAvailable: true,
+        axes: [axis],
+      })),
+      (args) => ({
+        ...args,
+        skiaVariationPosition: JSON.stringify({
+          available: true,
+          axisCount: 1,
+          coordinates: [coordinate],
+        }),
+      }),
+    );
+    const mutateVariable = (
+      actualMutation: (actual: Record<string, unknown>) => Record<string, unknown>,
+      positionMutation: (position: Record<string, unknown>) => Record<string, unknown>,
+    ): Record<string, unknown>[] =>
+      mutateScaler(mutateActual(variable, actualMutation), (args) => ({
+        ...args,
+        skiaVariationPosition: JSON.stringify(
+          positionMutation(JSON.parse(args.skiaVariationPosition as string)),
+        ),
+      }));
     const conflicting = [
       ...valid,
       ...mutateActual([valid[2] as Record<string, unknown>], (actual) => ({
@@ -292,7 +307,7 @@ test("used scaler rejections are granular and redact trace values", () => {
       },
       {
         name: "invalid-variation",
-        events: invalidVariation,
+        events: mutateScaler(variable, (args) => ({ ...args, skiaVariationPosition: "not-json" })),
         code: "observer-scaler-invalid-variation-schema",
       },
       {
@@ -328,9 +343,95 @@ test("used scaler rejections are granular and redact trace values", () => {
         code: "observer-scaler-file-digest-mismatch",
       },
       {
-        name: "variation-mismatch",
-        events: variableMismatch,
-        code: "observer-scaler-variation-mismatch",
+        name: "static-fvar-inconsistent",
+        events: mutateActual(valid, (actual) => ({ ...actual, axes: [axis] })),
+        code: "observer-scaler-static-fvar-inconsistent",
+      },
+      {
+        name: "inventory-unavailable",
+        events: mutateVariable(
+          (actual) => ({ ...actual, axisInventoryAvailable: false }),
+          (position) => position,
+        ),
+        code: "observer-scaler-fvar-inventory-unavailable",
+      },
+      {
+        name: "position-unavailable",
+        events: mutateVariable(
+          (actual) => actual,
+          (position) => ({ ...position, available: false }),
+        ),
+        code: "observer-scaler-skia-position-unavailable",
+      },
+      {
+        name: "axis-count-mismatch",
+        events: mutateVariable(
+          (actual) => actual,
+          (position) => ({ ...position, axisCount: 0 }),
+        ),
+        code: "observer-scaler-axis-count-mismatch",
+      },
+      {
+        name: "coordinate-length-mismatch",
+        events: mutateVariable(
+          (actual) => actual,
+          (position) => {
+            const { coordinates: _coordinates, ...withoutCoordinates } = position;
+            return withoutCoordinates;
+          },
+        ),
+        code: "observer-scaler-coordinate-length-mismatch",
+      },
+      {
+        name: "invalid-axis",
+        events: mutateVariable(
+          (actual) => ({ ...actual, axes: [{ ...axis, minimum: 901 }] }),
+          (position) => position,
+        ),
+        code: "observer-scaler-invalid-axis",
+      },
+      {
+        name: "duplicate-axis",
+        events: mutateVariable(
+          (actual) => ({ ...actual, axes: [axis, axis] }),
+          (position) => ({ ...position, axisCount: 2, coordinates: [coordinate, coordinate] }),
+        ),
+        code: "observer-scaler-duplicate-axis",
+      },
+      {
+        name: "missing-coordinate",
+        events: mutateVariable(
+          (actual) => ({ ...actual, axes: [axis, { ...axis, identifier: 1196445524 }] }),
+          (position) => ({ ...position, axisCount: 2, coordinates: [coordinate] }),
+        ),
+        code: "observer-scaler-missing-coordinate",
+      },
+      {
+        name: "excess-coordinate",
+        events: mutateVariable(
+          (actual) => actual,
+          (position) => ({
+            ...position,
+            coordinates: [coordinate, { identifier: 1196445524, value: 700 }],
+          }),
+        ),
+        code: "observer-scaler-excess-coordinate",
+      },
+      {
+        name: "duplicate-coordinate",
+        events: mutateVariable(
+          (actual) => ({ ...actual, axes: [axis, { ...axis, identifier: 1196445524 }] }),
+          (position) => ({ ...position, axisCount: 2, coordinates: [coordinate, coordinate] }),
+        ),
+        code: "observer-scaler-duplicate-coordinate",
+      },
+      {
+        name: "out-of-range-coordinate",
+        events: mutateVariable(
+          (actual) => actual,
+          (position) => ({ ...position, coordinates: [{ ...coordinate, value: 901 }] }),
+        ),
+        code: "observer-scaler-out-of-range-coordinate",
       },
     ];
     for (const fixture of cases) {

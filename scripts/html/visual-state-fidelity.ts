@@ -15,7 +15,10 @@ import {
   catalogProducerContextChanges,
   sameCatalogProducerContext,
 } from "./catalog-capture-producer-context";
-import { catalogStage90RejectionDiagnostics } from "./catalog-stage90-rejection-diagnostics";
+import {
+  catalogStage90RejectionDiagnostics,
+  type FontReconciliationRejectionStage,
+} from "./catalog-stage90-rejection-diagnostics";
 import { withObserverBrowser } from "./chromium-font-capture";
 import { assertCoreTextPostScriptOrder, validateFontProvenance } from "./coretext-font-provenance";
 import { applyEventsInteraction } from "./dynamic-events";
@@ -1724,14 +1727,13 @@ function verifyFontIdentityResponse(
   return { inventoryMethod, inventoryLimit, captures };
 }
 
-function finalizeFontIdentityCondition(
+function preflightFontIdentityCondition(
   row: Record<string, JsonValue>,
-  tuple: CatalogStage90ConditionPlan["conditions"][number],
+  conditionId: string,
   request: ChromeFontIdentityCapture,
   result: ChromeFontIdentityResponseCapture,
   requestRef: Record<string, JsonValue>,
-  responseRef: { path: string; sha256: string; sizeBytes: number },
-): JsonValue {
+) {
   const observation = jsonRecord(row.fontIdentityObservation, "font identity observation");
   const reasons = [
     ...stringArray(observation.unknownReasons, "CDP unknown reasons"),
@@ -1740,25 +1742,57 @@ function finalizeFontIdentityCondition(
   const resourceProvenance = jsonRecord(row.resourceProvenance, "resource provenance");
   const observedResources = jsonResourceFiles(resourceProvenance.requests);
   const observedFonts = jsonSelectedFonts(observation.selectedFonts);
+  let preflightRejection: FontReconciliationRejectionStage | undefined;
   if (
-    result.conditionId !== tuple.conditionId ||
-    row.fontIdentityRequestConditionId !== tuple.conditionId ||
+    result.conditionId !== conditionId ||
+    row.fontIdentityRequestConditionId !== conditionId ||
     row.fontIdentityRequestPath !== requestRef.path ||
     row.fontIdentityRequestSha256 !== requestRef.sha256 ||
-    row.fontIdentityRequestSizeBytes !== requestRef.sizeBytes ||
+    row.fontIdentityRequestSizeBytes !== requestRef.sizeBytes
+  )
+    preflightRejection = "font-reconciliation-request-binding";
+  else if (
     !sameJson(observedResources, request.resourceFiles) ||
+    resourceProvenance.inventoryComplete !== true
+  )
+    preflightRejection = "font-reconciliation-resource-inventory";
+  else if (
     !sameJson(
       observedFonts.map((font) => ({ ...font })) as unknown as JsonValue,
       request.selectedFonts.map((font) => ({ ...font })) as unknown as JsonValue,
     ) ||
-    resourceProvenance.inventoryComplete !== true ||
-    observation.status !== "observed" ||
-    result.status !== "resolved" ||
+    observation.status !== "observed"
+  )
+    preflightRejection = "font-reconciliation-selected-fonts";
+  else if (result.status !== "resolved")
+    preflightRejection = "font-reconciliation-probe-unresolved";
+  else if (
     reasons.length > 0 ||
     result.fontProvenance.length === 0 ||
-    result.fontProvenance.length !== request.selectedFonts.length ||
-    !resourceBodiesStillMatch(request.resourceFiles)
+    result.fontProvenance.length !== request.selectedFonts.length
   )
+    preflightRejection = "font-reconciliation-probe-result";
+  else if (!resourceBodiesStillMatch(request.resourceFiles))
+    preflightRejection = "font-reconciliation-resource-digest";
+  return { preflightRejection, resourceProvenance, reasons };
+}
+
+function finalizeFontIdentityCondition(
+  row: Record<string, JsonValue>,
+  tuple: CatalogStage90ConditionPlan["conditions"][number],
+  request: ChromeFontIdentityCapture,
+  result: ChromeFontIdentityResponseCapture,
+  requestRef: Record<string, JsonValue>,
+  responseRef: { path: string; sha256: string; sizeBytes: number },
+): JsonValue {
+  const { preflightRejection, resourceProvenance, reasons } = preflightFontIdentityCondition(
+    row,
+    tuple.conditionId,
+    request,
+    result,
+    requestRef,
+  );
+  if (preflightRejection !== undefined)
     return {
       ...row,
       status: "unverified",
@@ -1766,8 +1800,10 @@ function finalizeFontIdentityCondition(
       fontIdentityResponseSha256: responseRef.sha256,
       fontIdentityResponseSizeBytes: responseRef.sizeBytes,
       fontIdentityUnknownReasons: reasons,
+      fontIdentityFailureStage: preflightRejection,
     } as unknown as JsonValue;
 
+  let failureStage: FontReconciliationRejectionStage = "font-reconciliation-provenance";
   try {
     const verifiedFonts = validateFontProvenance(result.fontProvenance);
     assertCoreTextPostScriptOrder(
@@ -1775,11 +1811,13 @@ function finalizeFontIdentityCondition(
       request.selectedFonts.map((font) => font.postScriptName),
     );
     const expected = conditionIdentity(tuple, row);
+    failureStage = "font-reconciliation-krr-receipt";
     const krr = assertStrictHtml84KrrReceipt(
       jsonText(row.krrReportPath, "KRR report path"),
       jsonText(row.krrReportSha256, "KRR report SHA"),
       expected,
     );
+    failureStage = "font-reconciliation-chrome-receipt";
     const receiptPath = jsonText(row.chromeReceiptPath, "unknown Chrome receipt path");
     const receipt = jsonRecord(
       JSON.parse(fs.readFileSync(receiptPath, "utf8")) as JsonValue,
@@ -1806,6 +1844,7 @@ function finalizeFontIdentityCondition(
     });
     const identifiedSha = sha256File(identifiedPath);
     const chrome = assertStrictHtml84ChromeReceipt(identifiedPath, identifiedSha, expected);
+    failureStage = "font-reconciliation-state";
     if (stableJson(chrome.state) !== stableJson(krr.state))
       throw new Error("Chrome and KRR state differ after font provenance resolution");
     const captured = {
@@ -1835,6 +1874,10 @@ function finalizeFontIdentityCondition(
       fontIdentityResponseSha256: responseRef.sha256,
       fontIdentityResponseSizeBytes: responseRef.sizeBytes,
       fontIdentityUnknownReasons: [String(error)],
+      fontIdentityFailureStage:
+        row.fontIdentityFailureStage === "krr-observation-unknown"
+          ? "krr-observation-unknown"
+          : failureStage,
     } as unknown as JsonValue;
   }
 }
@@ -2088,6 +2131,7 @@ function unknownCatalogCondition(
     ...(krr.stateValue === undefined ? {} : { krrState: krr.stateValue }),
     status: "unverified",
     unknownReason: krr.unknownReason,
+    fontIdentityFailureStage: "krr-observation-unknown",
   } as unknown as JsonValue;
 }
 

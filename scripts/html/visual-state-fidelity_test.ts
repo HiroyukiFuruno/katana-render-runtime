@@ -271,6 +271,20 @@ describe("catalog stage90 rejection diagnostics", () => {
       },
     ]);
   });
+
+  test("reports only allowlisted stages of font reconciliation", () => {
+    const diagnostics = catalogStage90RejectionDiagnostics(
+      ["observed-stage", "untrusted-stage"],
+      [
+        { ...completeRow, fontIdentityFailureStage: "font-reconciliation-krr-receipt" },
+        { ...completeRow, fontIdentityFailureStage: "/private/evidence.json" },
+      ],
+    );
+    expect(diagnostics.conditions.map((condition) => condition.detail)).toEqual([
+      "font-reconciliation-krr-receipt",
+      undefined,
+    ]);
+  });
 });
 
 describe("catalog visual state inventory", () => {
