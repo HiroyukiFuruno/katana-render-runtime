@@ -1503,7 +1503,7 @@ jobs:
       - name: Checkout exact measurement source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'macos-stage90' && '37cae9728e2dbecb1a3a6e66656972863e78384e' || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'macos-stage90' && '36a4e8aca3970b841ccbfa80a921eda7dd3d5db7' || github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Record actual source HEAD
