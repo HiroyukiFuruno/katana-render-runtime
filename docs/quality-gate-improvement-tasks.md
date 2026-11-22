@@ -4,7 +4,8 @@
 
 - [x] PR #120の `56a8d3b4` はLinux x64、Windows x64、macOS Apple Siliconのビルド・テストが通過した。HTML84条件の採取工程は書体の厳密照合で停止した。[必須CIの実行結果](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44922928856)
 - [/] macOS 15の限定比較では、HTMLの操作状態は合格し、半透明装飾は同じ物理書体の可変軸が一致せず不合格だった。描画用CoreText書体を作るとChromeが記録した軸と一致することを別の実行で確認した。[2条件の比較](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44983414999)・[可変軸の調査](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44985045222)
-- [/] `6fb7525d` は描画用CoreText書体から軸を取得する。ローカルでは構造検査と関連18件に合格した。GitHubのmacOS 15で前回と同じ2条件を再比較する。正式な全84条件の結果、完全品質ゲート、PRの更新と公開は未完了。[修正後の限定比較](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44986269829)
+- [x] `6fb7525d` は描画用CoreText書体から軸を取得する。ローカルでは構造検査と関連18件に合格した。GitHubのmacOS 15では、前回と同じ2条件が厳密照合を通過し、可変軸の差は0件だった。物理書体の不一致、未知軸、範囲外座標を拒否するローカル回帰も関連6件が成功した（`fe275a2e`）。[修正後の限定比較](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44986269829)
+- [ ] 正式な全84条件の結果、完全品質ゲート、PRの更新と公開は未完了。凍結済みの依存バージョンを維持し、macOSの描画に必要な `objc2-core-graphics` を追加した構成で公開前の依存検査が成功した（`7c0b7905`）。
 
 ## 公開候補の現在地点（2026-11-20）
 
