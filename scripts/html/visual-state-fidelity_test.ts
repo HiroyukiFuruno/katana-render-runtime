@@ -346,7 +346,13 @@ describe("catalog stage90 rejection diagnostics", () => {
 
   test("reports only allowlisted stages of font reconciliation", () => {
     const diagnostics = catalogStage90RejectionDiagnostics(
-      ["observed-stage", "untrusted-stage", "ambiguous-font", "inaccessible-font"],
+      [
+        "observed-stage",
+        "untrusted-stage",
+        "ambiguous-font",
+        "inaccessible-font",
+        "no-observer-font",
+      ],
       [
         { ...completeRow, fontIdentityFailureStage: "font-reconciliation-krr-receipt" },
         { ...completeRow, fontIdentityFailureStage: "/private/evidence.json" },
@@ -360,6 +366,12 @@ describe("catalog stage90 rejection diagnostics", () => {
           ...completeRow,
           fontIdentityUnknownReasons: ["private font: read font: /private/font.ttc"],
         },
+        {
+          ...completeRow,
+          fontIdentityUnknownReasons: [
+            "private font: selected family has no uniquely indexed physical font file; Chrome retained font observation has no unique matching face",
+          ],
+        },
       ],
     );
     expect(diagnostics.conditions.map((condition) => condition.detail)).toEqual([
@@ -367,6 +379,7 @@ describe("catalog stage90 rejection diagnostics", () => {
       undefined,
       "font-probe-ambiguous-physical-face",
       "font-probe-file-unavailable",
+      "font-probe-observer-no-unique-face",
     ]);
     expect(JSON.stringify(diagnostics)).not.toContain("/private/");
   });

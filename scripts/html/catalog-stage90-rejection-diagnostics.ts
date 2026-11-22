@@ -63,6 +63,30 @@ const DIAGNOSTIC_MARKERS = [
   ["Catalog target geometry is missing:", "krr-target-geometry"],
   ["Operation evidence does not prove", "krr-operation-evidence"],
   ["actual font audit is incomplete", "krr-font-audit-incomplete"],
+  [
+    "Chrome retained font observation has no unique matching face",
+    "font-probe-observer-no-unique-face",
+  ],
+  [
+    "Chrome retained font observation path is not canonical",
+    "font-probe-observer-file-unavailable",
+  ],
+  ["Chrome retained font observation file is unavailable", "font-probe-observer-file-unavailable"],
+  ["Chrome retained font observation physical file differs", "font-probe-observer-file-differs"],
+  [
+    "Chrome retained font observation file is not a usable font",
+    "font-probe-observer-invalid-font",
+  ],
+  [
+    "Chrome retained font observation face does not match the selected font",
+    "font-probe-observer-face-mismatch",
+  ],
+  ["Chrome retained font observation physical face is invalid", "font-probe-observer-invalid-face"],
+  ["Chrome retained font observation physical face differs", "font-probe-observer-face-mismatch"],
+  [
+    "Chrome retained font observation changed before verification",
+    "font-probe-observer-file-differs",
+  ],
   ["no exact physical face matched the CDP PostScript name", "font-probe-no-physical-face"],
   ["multiple physical file/face-index matches are ambiguous", "font-probe-ambiguous-physical-face"],
   ["font face is memory-only, not physically attributable", "font-probe-memory-only-face"],

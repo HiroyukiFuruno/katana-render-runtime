@@ -60,3 +60,32 @@ fn custom_faces_do_not_use_retained_observer_fallback() -> Result<(), String> {
     assert!(result.is_err());
     Ok(())
 }
+
+#[test]
+fn missing_retained_face_keeps_both_resolution_failures() -> Result<(), String> {
+    let (_temp, _, selected) = physical_font_fixture()?;
+    let system_database = Database::new();
+    let mut cache = FontResolutionCache::for_system_database(&system_database);
+    let Err(error) = resolve_selected_identity(
+        &system_database,
+        ResolutionInputs {
+            resource_database: &Database::new(),
+            resources: &[],
+            resource_error: None,
+            observer_faces: &[],
+        },
+        &selected,
+        &mut cache,
+    ) else {
+        return Err("unproven system font was unexpectedly accepted".to_string());
+    };
+    let Some((native, retained)) = error.rsplit_once("; ") else {
+        return Err("one of the font resolution failures was lost".to_string());
+    };
+    assert!(!native.is_empty());
+    assert_eq!(
+        retained,
+        "Chrome retained font observation has no unique matching face"
+    );
+    Ok(())
+}

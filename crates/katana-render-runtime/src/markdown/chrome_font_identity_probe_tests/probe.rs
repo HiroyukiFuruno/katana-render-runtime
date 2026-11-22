@@ -126,7 +126,7 @@ fn resolve_selected_identity(
         Err(error) if selected.is_custom_font => Err(error),
         Err(native_error) => {
             super::identity::resolve_observer_face(selected, inputs.observer_faces)
-                .or(Err(native_error))
+                .map_err(|observer_error| format!("{native_error}; {observer_error}"))
         }
     }
 }
