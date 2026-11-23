@@ -74,17 +74,17 @@ V0424_FROZEN_BUN_CURRENT = (
     "950d2cc9f5530c95850fa3f92ada1e5b5cd31e33d46bbd9155e337bbaddab7df",
     "08b5f01b06835f7d036b046bd480ec1b87a39274bd7afd30f100342592e41d58",
 )
-# WHY: v0.4.24の凍結済み解決結果に、macOSの字形パス取得に必要な
-# objc2-core-graphics 0.3.2だけを追加した。既存packageの版は維持する。
+# WHY: v0.4.24の凍結済み解決結果は、macOSの字形パス取得と描画中の一時オブジェクト解放に
+# objc2-core-graphicsとobjc2を直接指定する。既存packageの版は維持する。
 # ZenUML Core 4.14.0の同梱チェックサムを指定しても、Rustの依存解決は同じ。
 V0424_FROZEN_RUST_CURRENT = {
-    Path("Cargo.lock"): "9aa34745c8aa537abdc5754667a1afe778eb4bd2aead4dd833c9d336958daa1b",
+    Path("Cargo.lock"): "ee1d4de307b47c9bfaac54cf010b19d290038dbca1f8766b6d0e1a760049fd6d",
     Path("Cargo.toml"): "c16e1a3d2c1ee595473c857586b8e0b49c7f278e3d912d3385d4b4a220e8b725",
     Path("crates/katana-render-runtime-assets/Cargo.toml"): "ab06237413c69883353951eb931772c219078d2d2f22a257751fbafc35dbf38f",
     Path("crates/katana-render-runtime-cli/Cargo.toml"): "453c476e11f6da0e18d265d48ac98e7674f5bc2e99aa6440417de1beeeb8bd3f",
-    Path("crates/katana-render-runtime/Cargo.toml"): "adf6945cabce92cd9e41d04cbe5c522cf03b6920d8429cfade6d5e9a21d6fdb0",
+    Path("crates/katana-render-runtime/Cargo.toml"): "5ae67a89044e26fde385d602309e986295ef3a975bcfca29003c1d57be795516",
     Path("crates/kdr-linter/Cargo.toml"): "dae81b877822e94f8244c1e846bf62284ca13977eb0c377e598439cc6343dbad",
-    Path("scripts/html/performance-harness/Cargo.lock"): "4f6ca91c2ae671ed63404ff22952936fab476e568f69d8cdc295c0898bfca5de",
+    Path("scripts/html/performance-harness/Cargo.lock"): "fe17b55ab87dab88b982f250eeb180564b1c76b86baf33e163ec12e49ee6679f",
     Path("scripts/html/performance-harness/Cargo.toml"): "f48872b19a3c41c529ce0d0ed701ffb0dad29c579152ca077cc8681acce898de",
 }
 # WHY: 公開候補の依存検査を通過した資産を、版名と内容の両方で固定する。

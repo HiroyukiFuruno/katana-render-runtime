@@ -1105,6 +1105,7 @@ dependencies = [
  "miniz_oxide 0.9.1",
  "moka",
  "nix 0.32.0",
+ "objc2",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-core-text",

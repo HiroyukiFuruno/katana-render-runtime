@@ -13,6 +13,10 @@ pub(in crate::markdown::svg_rasterize) const INTERFACE_BOLD_WEIGHT: u16 = 700;
 pub(in crate::markdown::svg_rasterize) trait PlatformFontStrategy {
     fn installed_paths(&self, families: &BTreeSet<&str>) -> BTreeSet<PathBuf>;
 
+    fn with_temporary_font_objects<T>(&self, operation: impl FnOnce() -> T) -> T {
+        operation()
+    }
+
     fn installed_system_ui_family(&self) -> Option<&'static str> {
         None
     }
@@ -114,6 +118,12 @@ impl PlatformFontStrategy for NativeFonts {
         } else {
             paths
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn with_temporary_font_objects<T>(&self, operation: impl FnOnce() -> T) -> T {
+        /* WHY: CLIや描画workerでもCoreTextの一時Objective-Cオブジェクトをフレーム終了時に解放する。 */
+        objc2::rc::autoreleasepool(|_| operation())
     }
 
     #[cfg(any(target_os = "macos", target_os = "ios"))]

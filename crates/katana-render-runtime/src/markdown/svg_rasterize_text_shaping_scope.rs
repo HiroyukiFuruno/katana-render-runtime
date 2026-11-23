@@ -20,13 +20,17 @@ pub(crate) struct HtmlFontFrameCache {
 
 impl HtmlFontFrameCache {
     pub(crate) fn with_frame<T>(&self, operation: impl FnOnce() -> T) -> T {
-        /* WHY: layoutとrasterで共有する書体の選択結果はframeごとに再評価する。 */
-        let _font_scope = harfrust::face_cache::FontFaceCacheScope::enter();
-        #[cfg(target_os = "macos")]
-        let _fallback_scope = super::native_html_runs::Scope::enter(&self.native_files);
-        #[cfg(target_os = "macos")]
-        let _native_html_faces = super::super::native_html_faces::Scope::enter();
-        operation()
+        use super::super::font::platform::{PlatformFontStrategy, font_platform};
+
+        font_platform().with_temporary_font_objects(|| {
+            /* WHY: layoutとrasterで共有する書体の選択結果はframeごとに再評価する。 */
+            let _font_scope = harfrust::face_cache::FontFaceCacheScope::enter();
+            #[cfg(target_os = "macos")]
+            let _fallback_scope = super::native_html_runs::Scope::enter(&self.native_files);
+            #[cfg(target_os = "macos")]
+            let _native_html_faces = super::super::native_html_faces::Scope::enter();
+            operation()
+        })
     }
 }
 

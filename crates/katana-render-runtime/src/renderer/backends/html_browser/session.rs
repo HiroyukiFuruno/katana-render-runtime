@@ -198,6 +198,10 @@ mod timer_tests;
 #[path = "session_requirements_tests.rs"]
 mod requirements_tests;
 
+#[cfg(all(test, target_os = "macos"))]
+#[path = "session_native_font_lifetime_tests.rs"]
+mod native_font_lifetime_tests;
+
 #[cfg(test)]
 #[path = "session_fragment_tests.rs"]
 mod fragment_tests;
