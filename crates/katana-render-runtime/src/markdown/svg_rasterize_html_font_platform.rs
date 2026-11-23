@@ -112,7 +112,7 @@ struct NativeFonts;
 #[cfg(any(windows, target_os = "macos", target_os = "ios"))]
 impl PlatformFontStrategy for NativeFonts {
     fn installed_paths(&self, families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
-        let paths = super::native_system_font_paths(families);
+        let paths = self.with_temporary_font_objects(|| super::native_system_font_paths(families));
         if paths.is_empty() {
             FontconfigFonts.installed_paths(families)
         } else {

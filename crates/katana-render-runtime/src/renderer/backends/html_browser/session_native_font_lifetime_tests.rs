@@ -1,3 +1,4 @@
+use crate::markdown::diagram_js_runtime::{DiagramRuntimeScript, DiagramV8Runtime};
 use crate::system::ProcessService;
 use crate::{HtmlBrowserSource, HtmlBrowserViewport, HtmlRuntime};
 use std::error::Error;
@@ -12,6 +13,7 @@ const VIEWPORT_HEIGHT: u32 = 200;
 #[test]
 fn html_font_work_releases_temporary_coretext_objects_on_a_worker() -> Result<(), Box<dyn Error>> {
     if std::env::var_os(CHILD_ENV).is_some() {
+        render_native_diagram_text()?;
         render_native_font_frames()?;
         println!("{COMPLETED}");
         return Ok(());
@@ -29,6 +31,16 @@ fn html_font_work_releases_temporary_coretext_objects_on_a_worker() -> Result<()
     assert!(String::from_utf8_lossy(&output.stdout).contains(COMPLETED));
     let warnings = String::from_utf8_lossy(&output.stderr);
     assert!(!warnings.contains("no pool in place"), "{warnings}");
+    Ok(())
+}
+
+fn render_native_diagram_text() -> Result<(), Box<dyn Error>> {
+    let script = DiagramRuntimeScript::borrowed(
+        "diagram-font-lifetime.js",
+        "globalThis.__katanaMeasureSvgTextMetrics('日本語 AV', 'Helvetica', 16, 400, false).advance",
+    );
+    let width: f64 = DiagramV8Runtime::render(&[script])?.parse()?;
+    assert!(width > 0.0, "diagram text must have a positive advance");
     Ok(())
 }
 
