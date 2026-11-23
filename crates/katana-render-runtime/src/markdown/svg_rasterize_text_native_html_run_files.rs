@@ -7,7 +7,7 @@ use super::super::super::harfrust::{
 };
 use super::MAX_PHYSICAL_FONTS;
 use objc2_core_text::CTFont;
-use resvg::usvg::fontdb::{Database, ID};
+use resvg::usvg::fontdb::{Database, ID, Source};
 use sha2::{Digest, Sha256};
 use std::{
     cell::RefCell,
@@ -28,7 +28,6 @@ pub(super) struct FileFace {
     pub(super) database: Arc<Database>,
     pub(super) id: ID,
     pub(super) name_table: Option<NameTableDigest>,
-    pub(super) mapped: Option<MappedFontBytes>,
 }
 
 impl FileFace {
@@ -38,7 +37,7 @@ impl FileFace {
         name_table: Option<NameTableDigest>,
         mapped: Option<MappedFontBytes>,
     ) -> Option<Self> {
-        let (database, id) = verified_database(&actual, &stamp)?;
+        let (database, id) = verified_database(&actual, &stamp, mapped)?;
         Some(Self {
             path: actual.canonical_path,
             name: actual.post_script_name,
@@ -46,7 +45,6 @@ impl FileFace {
             database,
             id,
             name_table,
-            mapped,
         })
     }
 
@@ -57,19 +55,14 @@ impl FileFace {
     }
 
     pub(super) fn with_face_data<T>(&self, inspect: impl FnOnce(&[u8], u32) -> T) -> Option<T> {
-        if let Some(bytes) = &self.mapped {
-            return Some(inspect(
-                bytes.as_ref().as_ref(),
-                self.database.face(self.id)?.index,
-            ));
-        }
         self.database.with_face_data(self.id, inspect)
     }
 
     fn mapped_bytes(&self) -> u64 {
-        self.mapped
-            .as_ref()
-            .map_or(0, |data| data.as_ref().as_ref().len() as u64)
+        match self.database.face_source(self.id) {
+            Some((Source::SharedFile(_, data), _)) => data.as_ref().as_ref().len() as u64,
+            _ => 0,
+        }
     }
 }
 
@@ -175,9 +168,16 @@ pub(super) fn name_table_digest(font: &CTFont) -> Option<NameTableDigest> {
 pub(super) fn verified_database(
     actual: &ActualCoreTextFace,
     stamp: &FileStamp,
+    mapped: Option<MappedFontBytes>,
 ) -> Option<(Arc<Database>, ID)> {
     let mut database = Database::new();
-    database.load_font_file(&actual.canonical_path).ok()?;
+    let path = actual.canonical_path.clone();
+    /* WHY: 書体の検証で取得した読み取り専用mappingを文字計測とラスタライズでも使う。 */
+    let source = match mapped {
+        Some(data) => Source::SharedFile(path, data),
+        None => Source::File(path),
+    };
+    database.load_font_source(source);
     let id = database
         .faces()
         .find(|face| face.index == actual.face_index)?
