@@ -761,7 +761,7 @@ html-performance-catalog-captures output_root prior_observation='' prior_finaliz
       test -s "$run_root/captures/catalog-stage90-captures.json"
 
 # stage90 capture manifestで計測する。件数・条件ID・閉鎖済みbatchは必要に応じて指定する。
-html-performance-evidence-produce catalog_manifest max_conditions='' condition_id='' resume_batch='':
+html-performance-evidence-produce catalog_manifest max_conditions='' condition_id='' resume_batch='' capture_launch_env='':
     @set -euo pipefail; \
       manifest={{quote(catalog_manifest)}}; \
       if [[ ! -f "$manifest" || -L "$manifest" ]]; then echo "catalog stage90 capture manifest is missing or not a regular file: $manifest" >&2; exit 2; fi; \
@@ -777,10 +777,12 @@ html-performance-evidence-produce catalog_manifest max_conditions='' condition_i
       max_conditions={{quote(max_conditions)}}; \
       condition_id={{quote(condition_id)}}; \
       resume_batch={{quote(resume_batch)}}; \
+      capture_launch_env={{quote(capture_launch_env)}}; \
       if [[ -n "$max_conditions" ]]; then batch_args+=(--max-conditions "$max_conditions"); fi; \
       if [[ -n "$condition_id" ]]; then batch_args+=(--condition-id "$condition_id"); fi; \
       if [[ -n "$resume_batch" ]]; then batch_args+=(--resume-batch "$resume_batch"); fi; \
-      {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap produce --repo "{{REPO_ROOT}}" "${capacity_args[@]}" --catalog-plan "$manifest" ${batch_args[@]+"${batch_args[@]}"}
+      if [[ -n "$capture_launch_env" ]]; then batch_args+=(--capture-launch-environment "$capture_launch_env"); fi; \
+      {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap {{HTML_PERFORMANCE_REPLAY_ARGS}}produce --repo "{{REPO_ROOT}}" "${capacity_args[@]}" --catalog-plan "$manifest" ${batch_args[@]+"${batch_args[@]}"}
 
 # HTML受入れとは独立にcandidate build proofだけを生成・検証する。
 html-performance-candidate-build-proof output capacity_binding capacity_binding_sha256:
