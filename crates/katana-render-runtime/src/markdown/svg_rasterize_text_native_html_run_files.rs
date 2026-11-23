@@ -2,9 +2,7 @@ use super::super::super::font::platform_fallback::actual_fallback::{
     ActualCoreTextFace, ActualCoreTextFontMetadata, actual_face_for, face_index, name_table,
 };
 use super::super::super::font::{FileStamp, observe_path_stamp};
-use super::super::super::harfrust::{
-    MappedFontBytes, eligible_immutable_system_path, map_immutable_font_data,
-};
+use super::super::super::harfrust::{MappedFontBytes, eligible_immutable_system_path};
 use super::MAX_PHYSICAL_FONTS;
 use objc2_core_text::CTFont;
 use resvg::usvg::fontdb::{Database, ID, Source};
@@ -15,6 +13,9 @@ use std::{
     rc::Rc,
     sync::Arc,
 };
+
+#[path = "svg_rasterize_text_native_html_mapping_pool.rs"]
+mod mapping_pool;
 
 const SHA256_DIGEST_BYTES: usize = 32;
 const MAPPED_FONT_SESSION_BYTES: u64 = 64 * 1024 * 1024;
@@ -141,7 +142,7 @@ fn map_source(path: &Path, stamp: &FileStamp, remaining: u64) -> Option<MappedFo
     if length > remaining || !eligible_immutable_system_path(path, length).ok()? {
         return None;
     }
-    let bytes = map_immutable_font_data(path, length).ok()?;
+    let bytes = mapping_pool::acquire(path, stamp, length)?;
     (observe_path_stamp(path).as_ref() == Ok(stamp)).then_some(bytes)
 }
 
