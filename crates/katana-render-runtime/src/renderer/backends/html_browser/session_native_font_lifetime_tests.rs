@@ -9,6 +9,7 @@ const COMPLETED: &str = "KRR_NATIVE_FONT_LIFETIME_COMPLETED";
 const TEST_HTML: &str = "<!doctype html><meta charset=utf-8><p id=target>Previous 旧</p><script>document.querySelector('#target').textContent='Current 追加';</script>";
 const VIEWPORT_WIDTH: u32 = 320;
 const VIEWPORT_HEIGHT: u32 = 200;
+const RGBA_CHANNELS: usize = 4;
 
 #[test]
 fn html_font_work_releases_temporary_coretext_objects_on_a_worker() -> Result<(), Box<dyn Error>> {
@@ -51,7 +52,8 @@ fn render_native_font_frames() -> Result<(), Box<dyn Error>> {
     let mut second = HtmlRuntime.open(source, viewport)?;
     let original = first.latest_frame().ok_or("first frame is missing")?;
     let concurrent = second.latest_frame().ok_or("second frame is missing")?;
-    assert!(original.pixels.chunks_exact(4).any(|pixel| pixel[0] < 128));
+    let (pixels, _) = original.pixels.as_chunks::<RGBA_CHANNELS>();
+    assert!(pixels.iter().any(|pixel| pixel[0] < 128));
     assert!(original.pixels == concurrent.pixels);
     second.close()?;
     first.close()?;
