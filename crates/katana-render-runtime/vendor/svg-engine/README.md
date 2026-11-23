@@ -60,6 +60,9 @@ resvgの `identity_op` / `too_many_arguments` / `upper_case_acronyms` / `wrong_s
 - 標準fontdb outlineが得られないglyphに限り、任意の内部outline providerを呼べるようにする。
   COLR・SVG・raster glyphと標準outlineを優先し、providerは同じfont ID・glyph ID・実効variation座標を受ける。
   結果は既存outline cacheに保存し、未設定時とproviderが`None`を返す場合の既定描画は変更しない。nested SVGにも同じproviderを渡す。
+- SVGの変換中は、埋め込み字形テーブルの有無を書体ごとに記録する。
+  通常のoutline書体ではCOLR・SVG・ビットマップ字形の照会を省き、埋め込み字形の優先順位は維持する。
+  一時的に読み込めなかった書体は結果を保存せず、後続の字形で再試行する。
 
 Issue #119では37ファイルの135関数を責務ごとのprivate helperへ分割する。
 公開API、演算順、キャッシュ、描画動作を維持し、既存の描画・性能回帰で確認する。

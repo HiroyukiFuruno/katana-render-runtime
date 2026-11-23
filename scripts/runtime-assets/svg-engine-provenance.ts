@@ -5,8 +5,8 @@ import { validateManifest } from "./svg-engine-provenance-manifest";
 import { METADATA, type Provenance, readProvenance } from "./svg-engine-provenance-schema";
 
 const VENDOR_RELATIVE = "crates/katana-render-runtime/vendor/svg-engine";
-const PROVENANCE_SHA256 = "9c942aece06ceb35c27dd5735154e68e8b019707065113cf6a3fb750a829042b";
-const README_SHA256 = "e5dfc0e1556fcb2359e573f88a03b6dce1e2b1e5532920b01c635eac8dbbab44";
+const PROVENANCE_SHA256 = "2ad4d64243f277a3e7aed60c22c1f23f153132d5a3d5515bdb4ebe94d1cae72a";
+const README_SHA256 = "fa8baeecbad2e20cad53c0c08e33ba4fa59a8a7cc2927be434137934879f9087";
 
 function fail(message: string): never {
   throw new Error(`SVG engine provenance: ${message}`);
