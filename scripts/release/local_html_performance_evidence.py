@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import cast
 
 import local_macos_evidence as mac
+import html_performance_memory_policy as memory_policy
 import html_performance_source_reuse_cli as reuse_cli
 from html_performance_python_identity import installed_identity
 from verify_completed_release_context import verified_merged_pr_binding
@@ -85,7 +86,7 @@ def valid(comment: object, repository: str, number: int, base: str, head: str,
             or login.lower() != owner.lower()
             or comment.get("author_association") != "OWNER"
             or value.get("schema") != SCHEMA or value.get("repository") != repository
-            or value.get("memory_policy_version") != "html-memory-v5"
+            or value.get("memory_policy_version") != memory_policy.CURRENT_ACCEPTANCE_POLICY_VERSION
             or type(value.get("pull_request")) is not int or value["pull_request"] != number
             or value.get("base_sha") != base or value.get("head_sha") != head
             or value.get("workflow_sha256") != workflow_sha or value.get("scope_sha256") != scope(workflow_sha)
@@ -203,14 +204,15 @@ def collect(repository: str, number: int, directory: Path,
     verification_kind: str | None = None
     measured_head = head
     if reuse_request is None:
-        result = gate.verify(directory, mac.ROOT, memory_policy_version="html-memory-v5")
+        result = gate.verify(directory, mac.ROOT,
+                             memory_policy_version=memory_policy.CURRENT_ACCEPTANCE_POLICY_VERSION)
     else:
         eligibility_sha = gate.sha256(reuse_request)
         reuse_result = reuse_cli.verify_reuse_request(
             reuse_request, mac.ROOT, expected_measured_dir=directory,
             expected_measured_manifest_sha256=manifest_sha,
             expected_request_sha256=eligibility_sha,
-            memory_policy_version="html-memory-v5",
+            memory_policy_version=memory_policy.CURRENT_ACCEPTANCE_POLICY_VERSION,
         )
         gate.require(reuse_result.get("reuseEligibility") is True
                      and reuse_result.get("eligibleHead") == head,
@@ -227,7 +229,7 @@ def collect(repository: str, number: int, directory: Path,
         result = gate._object(reuse_result.get("measuredResult"), "measured formal result")
         gate._require_formal_release_result(result)
         gate.require(gate.sha256(reuse_request) == eligibility_sha, "reuse request changed")
-    gate._require_cli_memory_v5(result, reused=False)
+    gate._require_cli_current_memory(result, reused=False)
     if installed_identity("1.18.1", "2.5.4") != runtime_identity:
         raise mac.EvidenceError("scientific runtime changed during verification")
     require_measurement_host(directory, host_platform)

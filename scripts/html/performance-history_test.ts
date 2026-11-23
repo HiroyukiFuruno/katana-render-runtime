@@ -142,6 +142,13 @@ function addV5Record(history: PerformanceHistory): PerformanceHistoryRecord {
   return record;
 }
 
+function addV6Record(history: PerformanceHistory): PerformanceHistoryRecord {
+  const record = addV4Record(history);
+  record.id = "html-memory-v6-record";
+  record.memoryPolicy = { ...validMemoryPolicyV4(record), version: "html-memory-v6" };
+  return record;
+}
+
 function runHistoryCli(args: string[]): ReturnType<typeof Bun.spawnSync> {
   return Bun.spawnSync(["bun", path.join(import.meta.dir, "performance-history-cli.ts"), ...args], {
     cwd: root,
@@ -304,6 +311,13 @@ test("accepts v5 evidence and rejects incomplete condition coverage", () => {
   const record = addV5Record(history);
   expect(parsePerformanceHistory(history).records.at(-1)).toEqual(record);
   expectInvalidMemoryPolicyChanges(addV5Record);
+});
+
+test("accepts v6 evidence and rejects incomplete condition coverage", () => {
+  const history = fixture();
+  const record = addV6Record(history);
+  expect(parsePerformanceHistory(history).records.at(-1)).toEqual(record);
+  expectInvalidMemoryPolicyChanges(addV6Record);
 });
 
 test("rejects a reference that does not meet its recorded acceptance", () => {

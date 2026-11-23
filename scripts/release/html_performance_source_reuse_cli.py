@@ -15,7 +15,9 @@ from pathlib import Path
 from typing import TypedDict
 
 import verify_html_performance_evidence as gate
-from html_performance_memory_policy import REASSESSMENT_POLICY_VERSIONS, PREVIOUS_POLICY_VERSION
+from html_performance_memory_policy import (
+    CURRENT_ACCEPTANCE_POLICY_VERSION, PREVIOUS_POLICY_VERSION, REASSESSMENT_POLICY_VERSIONS,
+)
 
 SCHEMA = "krr-html-performance-source-reuse-request-v1"
 ELIGIBILITY_SCHEMA = "krr-html-performance-source-reuse-eligibility-v2"
@@ -220,6 +222,8 @@ def main() -> int:
         version = f"html-memory-v{number}"
         policy_group.add_argument(f"--require-memory-policy-v{number}",
                                   action="store_const", const=version, dest="memory_policy_version")
+    policy_group.add_argument("--require-current-memory-policy", action="store_const",
+                              const=CURRENT_ACCEPTANCE_POLICY_VERSION, dest="memory_policy_version")
     args = parser.parse_args()
     request: ReuseRequest = {
         "schema": SCHEMA, "measuredDir": args.measured_dir,

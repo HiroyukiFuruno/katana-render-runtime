@@ -159,7 +159,7 @@ class ActiveReferenceTest(unittest.TestCase):
             )
 
         invalid_policy_values: tuple[tuple[str, object], ...] = (
-            ("version", "html-memory-v6"),
+            ("version", "html-memory-v7"),
             ("policySha256", "A" * 64),
             ("retentionEvidenceSha256", "bad"),
             ("candidateConditions", 83),
@@ -262,7 +262,7 @@ class ActiveReferenceTest(unittest.TestCase):
                 )
 
     def test_reference_accepts_mixed_legacy_history_and_rejects_bad_counts(self) -> None:
-        for version in ("html-memory-v4", "html-memory-v5"):
+        for version in ("html-memory-v4", "html-memory-v5", "html-memory-v6"):
             with self.subTest(version=version):
                 self.check_reference_accepts_mixed_legacy_history(version)
 

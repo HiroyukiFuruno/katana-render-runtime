@@ -34,11 +34,15 @@ const memoryPolicyV4 = memoryPolicyV2.extend({
 const memoryPolicyV5 = memoryPolicyV2.extend({
   version: z.literal("html-memory-v5"),
 });
+const memoryPolicyV6 = memoryPolicyV2.extend({
+  version: z.literal("html-memory-v6"),
+});
 const memoryPolicy = z.discriminatedUnion("version", [
   memoryPolicyV2,
   memoryPolicyV3,
   memoryPolicyV4,
   memoryPolicyV5,
+  memoryPolicyV6,
 ]);
 const seconds = z.number().finite().nonnegative();
 const phase = z

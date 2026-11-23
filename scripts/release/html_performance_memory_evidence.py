@@ -52,6 +52,23 @@ def _proven_no_scroll(samples: Sequence[gate.JsonObject]) -> bool:
     ) for sample in samples)
 
 
+def _full_y_rss_matches_re_display(samples: Sequence[gate.JsonObject]) -> bool:
+    """Require a no-op full-Y to retain the preceding display RSS exactly."""
+    return len(samples) == memory.SAMPLE_COUNT and all(
+        gate._integer(
+            gate._object(gate._object(sample["phases"], "phases")["full_y"], "full-Y phase")
+            ["peak_rss_bytes"],
+            "full-Y peak RSS",
+        )
+        == gate._integer(
+            gate._object(gate._object(sample["phases"], "phases")["re_display"], "re-display phase")
+            ["peak_rss_bytes"],
+            "re-display peak RSS",
+        )
+        for sample in samples
+    )
+
+
 def _phase_values(samples: Sequence[gate.JsonObject], phase: str, *,
                   no_scroll: bool) -> tuple[list[float], list[float]]:
     measured = [gate._phase_sample(sample, phase) for sample in samples]
@@ -70,10 +87,9 @@ def evaluate_paired(
     gate.require(aggregate["measurement_executed"] is True, "actual measurements absent")
     baseline = _validated_samples(grouped["baseline"])
     candidate = _validated_samples(grouped["candidate"])
-    no_scroll = (policy_version == memory.ZERO_SCROLL_POLICY_VERSION
+    no_scroll = (policy_version in memory.NO_SCROLL_TIMING_POLICY_VERSIONS
                  and _proven_no_scroll(baseline) and _proven_no_scroll(candidate))
     phases: dict[str, object] = {}
-    accepted = True
     for phase in gate.PHASES:
         no_scroll_phase = no_scroll and phase == "full_y"
         base_time, base_rss = _phase_values(baseline, phase, no_scroll=no_scroll_phase)
@@ -81,7 +97,20 @@ def evaluate_paired(
         result = memory.evaluate_peak_phase(base_rss, candidate_rss, base_time, candidate_time,
                                             policy_version=policy_version)
         phases[phase] = asdict(result)
-        accepted = accepted and result.peak_allowed
+    cumulative_noop = (
+        policy_version == memory.CUMULATIVE_RSS_POLICY_VERSION
+        and no_scroll
+        and _full_y_rss_matches_re_display(baseline)
+        and _full_y_rss_matches_re_display(candidate)
+    )
+    if cumulative_noop:
+        re_display = gate._object(phases.get("re_display"), "re-display result")
+        full_y = gate._object(phases.get("full_y"), "full-Y result")
+        full_y["peak_allowed"] = re_display["peak_allowed"]
+        full_y["category"] = "inherited-re-display"
+        full_y["inheritedCategory"] = re_display["category"]
+    accepted = all(gate._object(value, "phase result")["peak_allowed"] is True
+                   for value in phases.values())
     retention = memory.evaluate_retention(retained_rss, policy_version=policy_version)
     return {
         "version": policy_version,

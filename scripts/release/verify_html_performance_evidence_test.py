@@ -4761,7 +4761,7 @@ class PerformanceAcquisitionTest(unittest.TestCase):
         build: JsonObject = {"binarySha256": candidate["binary_sha256"],
                              "sourceSnapshotSha256": candidate["source_snapshot_sha256"]}
         result: JsonObject = {"head": self.fixture.head, "performanceNonregression": True,
-                              "memoryPolicyVersion": "html-memory-v5",
+                              "memoryPolicyVersion": "html-memory-v6",
                               "htmlStage90": {"acceptance": True, "fontIdentityEquivalence": "established"}}
         with patch.object(attestation, "verify_remote_attestation"), \
              patch.object(remote_evidence, "extract_remote_transport"), \
@@ -4775,7 +4775,7 @@ class PerformanceAcquisitionTest(unittest.TestCase):
                 self.repository, {}, "artifact", self.fixture.head)
             self.assertEqual(verified, result)
             self.assertIsInstance(verify.call_args.kwargs["remote_context"], remote_admission.RemoteEvidenceContext)
-            self.assertEqual(verify.call_args.kwargs["memory_policy_version"], "html-memory-v5")
+            self.assertEqual(verify.call_args.kwargs["memory_policy_version"], "html-memory-v6")
             verify.return_value = {**result, "head": "b" * 40}
             with self.assertRaisesRegex(ValueError, "remote formal result differs"):
                 remote_admission.verify_authenticated_remote(
@@ -5179,22 +5179,26 @@ class PerformanceAcquisitionTest(unittest.TestCase):
 
 
 class PerformanceJsonBoundaryTest(unittest.TestCase):
-    def test_acquired_v5_evidence_is_revalidated_at_release_gate(self) -> None:
+    def test_acquired_versioned_evidence_is_revalidated_at_release_gate(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             (root / "acquisition.json").write_text("{}")
-            argv = ["verify_html_performance_evidence.py", "--repo", str(root),
-                    "--evidence-dir", str(root), "--require-memory-policy-v5"]
-            attestation: JsonObject = {"kind": "owner-local-html-performance", "conditions": 84,
-                                       "memoryPolicyVersion": "html-memory-v5"}
-            for result, status in ((attestation, 0), ({**attestation, "conditions": 83}, 1),
-                                   ({**attestation, "memoryPolicyVersion": "html-memory-v4"}, 1)):
-                with (self.subTest(result=result), patch.object(gate.sys, "argv", argv),
-                      patch.object(gate.sys, "stdout", io.StringIO()),
-                      patch.object(gate.sys, "stderr", io.StringIO()),
-                      patch.object(gate, "acquire", return_value=result) as acquire):
-                    self.assertEqual(gate.main(), status)
-                    self.assertNotEqual(acquire.call_args.args[0], root)
+            for flag, version, preceding in (
+                ("--require-memory-policy-v5", "html-memory-v5", "html-memory-v4"),
+                ("--require-current-memory-policy", "html-memory-v6", "html-memory-v5"),
+            ):
+                argv = ["verify_html_performance_evidence.py", "--repo", str(root),
+                        "--evidence-dir", str(root), flag]
+                attestation: JsonObject = {"kind": "owner-local-html-performance", "conditions": 84,
+                                           "memoryPolicyVersion": version}
+                for result, status in ((attestation, 0), ({**attestation, "conditions": 83}, 1),
+                                       ({**attestation, "memoryPolicyVersion": preceding}, 1)):
+                    with (self.subTest(result=result, flag=flag), patch.object(gate.sys, "argv", argv),
+                          patch.object(gate.sys, "stdout", io.StringIO()),
+                          patch.object(gate.sys, "stderr", io.StringIO()),
+                          patch.object(gate, "acquire", return_value=result) as acquire):
+                        self.assertEqual(gate.main(), status)
+                        self.assertNotEqual(acquire.call_args.args[0], root)
 
     def test_cached_acquisition_is_reauthenticated_before_formal_gate_reuse(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

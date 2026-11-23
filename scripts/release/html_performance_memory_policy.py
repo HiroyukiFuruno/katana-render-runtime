@@ -14,10 +14,20 @@ LEGACY_POLICY_VERSION = "html-memory-v2"
 PREVIOUS_POLICY_VERSION = "html-memory-v3"
 POLICY_VERSION = "html-memory-v4"
 ZERO_SCROLL_POLICY_VERSION = "html-memory-v5"
-CURRENT_ACCEPTANCE_POLICY_VERSION = ZERO_SCROLL_POLICY_VERSION
-REASSESSMENT_POLICY_VERSIONS = (POLICY_VERSION, CURRENT_ACCEPTANCE_POLICY_VERSION)
+CUMULATIVE_RSS_POLICY_VERSION = "html-memory-v6"
+CURRENT_ACCEPTANCE_POLICY_VERSION = CUMULATIVE_RSS_POLICY_VERSION
+NO_SCROLL_TIMING_POLICY_VERSIONS = (
+    ZERO_SCROLL_POLICY_VERSION,
+    CUMULATIVE_RSS_POLICY_VERSION,
+)
+REASSESSMENT_POLICY_VERSIONS = (
+    POLICY_VERSION,
+    ZERO_SCROLL_POLICY_VERSION,
+    CURRENT_ACCEPTANCE_POLICY_VERSION,
+)
 SUPPORTED_POLICY_VERSIONS = (
     LEGACY_POLICY_VERSION, PREVIOUS_POLICY_VERSION, POLICY_VERSION, ZERO_SCROLL_POLICY_VERSION,
+    CUMULATIVE_RSS_POLICY_VERSION,
 )
 SAMPLE_COUNT = 25
 MIB = 1024 * 1024
@@ -149,7 +159,8 @@ def evaluate_peak_phase(
     if not math.isfinite(speedup_ms) or not math.isfinite(speedup_ratio):
         raise ValueError("elapsed comparison is not finite")
     central = {LEGACY_POLICY_VERSION: differences, PREVIOUS_POLICY_VERSION: (median, p95),
-               POLICY_VERSION: (median,), ZERO_SCROLL_POLICY_VERSION: (median,)}[policy_version]
+               POLICY_VERSION: (median,), ZERO_SCROLL_POLICY_VERSION: (median,),
+               CUMULATIVE_RSS_POLICY_VERSION: (median,)}[policy_version]
     small = all(_within(item, SMALL_PEAK_BYTES, SMALL_PEAK_RATIO) for item in central)
     bounded = all(_within(item, MAX_PEAK_BYTES, MAX_PEAK_RATIO) for item in differences)
     faster = (improvement.test_performed and improvement.detected_bad

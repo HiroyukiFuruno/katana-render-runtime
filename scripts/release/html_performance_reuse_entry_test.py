@@ -47,12 +47,13 @@ class ReuseEntryTest(unittest.TestCase):
             request.parent.mkdir(parents=True)
             request.write_text("{}", encoding="utf-8")
             with (patch("sys.argv", ["verify-html-performance", "--repo", str(root),
-                                     "--require-memory-policy-v5"]),
+                                     "--require-current-memory-policy"]),
                   patch.object(gate, "_verify_reuse_request_with_policy", return_value={}) as verify):
                 self.assertEqual(gate.main(), 0)
             verify.assert_called_once_with(request, root, require_memory_policy_v2=False,
                                            require_memory_policy_v3=False, require_memory_policy_v4=False,
-                                           require_memory_policy_v5=True)
+                                           require_memory_policy_v5=False,
+                                           require_current_memory_policy=True)
 
     def test_program_source_reuse_requires_current_binary_and_environment(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

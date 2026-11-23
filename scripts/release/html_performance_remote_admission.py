@@ -52,10 +52,10 @@ def verify_authenticated_remote(directory: Path, archive: Path, root: Path, repo
     context = RemoteEvidenceContext(head, gate.sha256(directory / "bundle.json"),
                                     {"baseline": baseline, "candidate": build},
                                     authority=_REMOTE_CONTEXT_AUTHORITY)
-    from html_performance_memory_policy import ZERO_SCROLL_POLICY_VERSION
+    from html_performance_memory_policy import NO_SCROLL_TIMING_POLICY_VERSIONS
 
-    policy = (ZERO_SCROLL_POLICY_VERSION
-              if producer_result.get("memoryPolicyVersion") == ZERO_SCROLL_POLICY_VERSION else None)
+    policy_version = producer_result.get("memoryPolicyVersion")
+    policy = policy_version if policy_version in NO_SCROLL_TIMING_POLICY_VERSIONS else None
     result = gate._verify(directory, root, require_catalog=True, remote_context=context,
                           **gate._memory_policy_kwargs(policy))
     gate._require_formal_release_result(result)
