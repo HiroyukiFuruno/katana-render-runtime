@@ -12,6 +12,7 @@ mod node_boundary_tests;
 type Generator = fn(&mut Cache) -> NonEmptyString;
 
 const CONSECUTIVE_COLLISIONS: usize = 3;
+const OUTLINE_FONT: &[u8] = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
 
 fn cache_with_source_ids(prefix: &str, count: usize) -> Result<Cache, String> {
     let elements: String = (1..=count)
@@ -55,4 +56,24 @@ fn generated_ids_skip_collected_source_collisions_and_remain_unique(
     #[values(0, 1, CONSECUTIVE_COLLISIONS)] collisions: usize,
 ) -> Result<(), String> {
     assert_generator(prefix, generate, collisions)
+}
+
+#[test]
+fn glyph_capabilities_retry_after_a_font_file_becomes_available() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let path = directory.path().join("outline-font.ttf");
+    let write_font = || std::fs::write(&path, OUTLINE_FONT).map_err(|error| error.to_string());
+    write_font()?;
+    let mut database = fontdb::Database::new();
+    let faces = database.load_font_source(fontdb::Source::File(path.clone()));
+    let id = *faces.first().ok_or("font file contained no faces")?;
+    let database = Arc::new(database);
+    let mut cache = Cache::new(database.clone(), Rc::new(RefCell::new(database)));
+
+    std::fs::remove_file(&path).map_err(|error| error.to_string())?;
+    assert!(cache.glyph_capabilities(id).has_embedded_glyphs);
+
+    write_font()?;
+    assert!(!cache.glyph_capabilities(id).has_embedded_glyphs);
+    Ok(())
 }
