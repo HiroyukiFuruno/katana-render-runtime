@@ -7,6 +7,11 @@ use std::{collections::BTreeSet, ops::ControlFlow, path::PathBuf};
 mod fontconfig;
 use fontconfig::FontconfigFonts;
 
+/* WHY: CoreTextを先に使う場合も、JDKの書体照会に必要なAppKitを起動時に読み込む。 */
+#[cfg(target_os = "macos")]
+#[link(name = "AppKit", kind = "framework")]
+unsafe extern "C" {}
+
 #[cfg(target_os = "macos")]
 pub(in crate::markdown::svg_rasterize) const INTERFACE_BOLD_WEIGHT: u16 = 700;
 
