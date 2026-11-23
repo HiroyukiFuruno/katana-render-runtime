@@ -934,11 +934,16 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
         self.assertIn("catalog-stage90-capture", justfile)
         self.assertIn("refusing symlinked HTML stage90 output parent", justfile)
         self.assertIn("refusing existing HTML stage90 output root", justfile)
-        self.assertIn(
-            "html-performance-evidence-produce catalog_manifest max_conditions='' "
-            "condition_id='' resume_batch='':",
-            justfile,
+        performance_recipe_header = next(
+            line for line in justfile.splitlines()
+            if line.startswith("html-performance-evidence-produce ")
         )
+        self.assertEqual(
+            performance_recipe_header,
+            "html-performance-evidence-produce catalog_manifest max_conditions='' "
+            "condition_id='' resume_batch='' capture_launch_env='':",
+        )
+        self.assertIn('batch_args+=(--capture-launch-environment "$capture_launch_env")', justfile)
         self.assertIn('--catalog-plan "$manifest"', justfile)
         self.assertNotIn("html-performance-evidence-produce:\n", justfile)
 
