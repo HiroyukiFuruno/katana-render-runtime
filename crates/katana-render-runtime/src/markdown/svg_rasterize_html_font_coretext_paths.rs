@@ -1,0 +1,83 @@
+use objc2_core_foundation::{CFArray, CFDictionary, CFRetained, CFSet, CFString, CFURL};
+use objc2_core_text::{CTFontDescriptor, kCTFontFamilyNameAttribute, kCTFontURLAttribute};
+use std::{collections::BTreeSet, path::PathBuf};
+
+pub(super) fn resolve_paths<'a>(
+    families: &BTreeSet<&'a str>,
+    scan: impl FnOnce(&BTreeSet<&'a str>) -> BTreeSet<PathBuf>,
+) -> BTreeSet<PathBuf> {
+    let mut paths = BTreeSet::new();
+    let mut unresolved = BTreeSet::new();
+    for &family in families {
+        let direct = registered_family_paths(family);
+        if direct.is_empty() {
+            unresolved.insert(family);
+        }
+        paths.extend(direct);
+    }
+    if !unresolved.is_empty() {
+        paths.extend(scan(&unresolved));
+    }
+    paths
+}
+
+fn registered_family_paths(family: &str) -> BTreeSet<PathBuf> {
+    matching_descriptors(family)
+        .iter()
+        .flat_map(|descriptors| (0..descriptors.len()).filter_map(|index| descriptors.get(index)))
+        .filter_map(|descriptor| descriptor_path(&descriptor))
+        .filter(|path| path.is_file())
+        .collect()
+}
+
+fn matching_descriptors(family: &str) -> Option<CFRetained<CFArray<CTFontDescriptor>>> {
+    /* SAFETY: CoreTextの公開属性定数はプロセスの存続中有効。 */
+    let key = unsafe { kCTFontFamilyNameAttribute };
+    let name = CFString::from_str(family);
+    let attributes = CFDictionary::from_slices(&[key], &[&*name]);
+    /* SAFETY: family名は公開APIが要求するCFStringで渡す。 */
+    let descriptor = unsafe { CTFontDescriptor::with_attributes((*attributes).as_ref()) };
+    let mandatory = mandatory_family_key(key)?;
+    /* SAFETY: 引数はCFStringの集合。戻り値はCTFontDescriptorの配列という公開API契約。 */
+    unsafe {
+        descriptor
+            .matching_font_descriptors(Some(&mandatory))
+            .map(|descriptors| CFRetained::cast_unchecked(descriptors))
+    }
+}
+
+fn mandatory_family_key(key: &CFString) -> Option<CFRetained<CFSet>> {
+    let mut keys = [std::ptr::from_ref(key).cast()];
+    /* SAFETY: 要素は1件のCFStringで、Core Foundationの参照管理を使用する。 */
+    unsafe {
+        CFSet::new(
+            None,
+            keys.as_mut_ptr(),
+            1,
+            &objc2_core_foundation::kCFTypeSetCallBacks,
+        )
+    }
+}
+
+fn descriptor_path(descriptor: &CTFontDescriptor) -> Option<PathBuf> {
+    /* SAFETY: CoreTextから取得した所有済み属性をCFURLへ型検査してから扱う。 */
+    let url = unsafe { descriptor.attribute(kCTFontURLAttribute) }?;
+    url.downcast::<CFURL>().ok()?.to_file_path()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BTreeSet, PathBuf, resolve_paths};
+
+    #[test]
+    fn coretext_resolves_registered_families_and_scans_only_unresolved_families() {
+        let missing = "krr unregistered fallback test family";
+        let paths = resolve_paths(&BTreeSet::from(["times", missing]), |unresolved| {
+            assert_eq!(unresolved, &BTreeSet::from([missing]));
+            BTreeSet::from([PathBuf::from("/tmp/krr-legacy-fallback.ttf")])
+        });
+
+        assert!(paths.contains(&PathBuf::from("/System/Library/Fonts/Times.ttc")));
+        assert!(paths.contains(&PathBuf::from("/tmp/krr-legacy-fallback.ttf")));
+    }
+}

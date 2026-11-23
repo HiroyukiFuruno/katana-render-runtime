@@ -1,8 +1,22 @@
 use resvg::usvg::fontdb::{Database, FaceInfo, Source};
 use std::{collections::BTreeSet, path::PathBuf};
 
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_font_coretext_paths.rs"]
+mod coretext;
+
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(super) fn native_system_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        coretext::resolve_paths(families, scan_system_font_paths)
+    }
+    #[cfg(target_os = "ios")]
+    scan_system_font_paths(families)
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn scan_system_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
     /* WHY: 一時DBはinstalled face metadataだけを走査し、選択したFile sourceだけを呼出元DBへ残す。 */
     let mut database = Database::new();
     database.load_system_fonts();

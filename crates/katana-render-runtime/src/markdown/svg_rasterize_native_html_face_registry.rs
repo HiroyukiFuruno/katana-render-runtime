@@ -10,6 +10,17 @@ const ALIAS_PREFIX: &str = "__krr_native_html_face_";
 const MAX_FACES: usize = 16;
 const SYSTEM_ROOTS: [&str; 2] = ["/System/Library/", "/Library/Apple/System/Library/"];
 
+pub(in crate::markdown::svg_rasterize) fn is_used_alias(markup: &str, family: &str) -> bool {
+    family.starts_with(ALIAS_PREFIX)
+        && REGISTRY.with(|registry| {
+            registry
+                .borrow()
+                .as_ref()
+                .is_some_and(|faces| faces.iter().any(|entry| entry.alias == family))
+        })
+        && has_family_attribute(markup, family)
+}
+
 struct RegisteredFace {
     alias: String,
     face: fontdb::FaceInfo,
@@ -87,9 +98,7 @@ pub(in crate::markdown::svg_rasterize) fn apply(
             .as_deref()
             .unwrap_or(&[])
             .iter()
-            .filter(|entry| {
-                markup.contains(&format!("font-family=\"&quot;{}&quot;\"", entry.alias))
-            })
+            .filter(|entry| has_family_attribute(markup, &entry.alias))
             .map(aliased_face)
             .collect::<Vec<_>>()
     });
@@ -101,6 +110,10 @@ pub(in crate::markdown::svg_rasterize) fn apply(
         cloned.push_face_info(face);
     }
     Arc::new(cloned)
+}
+
+fn has_family_attribute(markup: &str, family: &str) -> bool {
+    markup.contains(&format!("font-family=\"&quot;{family}&quot;\""))
 }
 
 fn aliased_face(entry: &RegisteredFace) -> fontdb::FaceInfo {

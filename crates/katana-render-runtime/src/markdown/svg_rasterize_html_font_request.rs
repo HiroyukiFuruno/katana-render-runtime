@@ -22,6 +22,11 @@ impl HtmlFontRequest {
                 }
             }
         }
+        #[cfg(target_os = "macos")]
+        /* WHY: 登録済みの書体は描画optionsで追加するため、システム探索とDBのキーから外す。 */
+        families.retain(|family| {
+            !crate::markdown::svg_rasterize::native_html_faces::is_used_alias(markup, family)
+        });
         Self {
             families: families.into_iter().collect(),
             needs_cjk: markup.chars().any(is_cjk_character),
@@ -155,6 +160,30 @@ fn is_emoji_character(character: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{HtmlFontRequest, font_family_value, is_cjk_character};
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn registered_native_alias_is_removed_from_the_discovery_request() -> Result<(), String> {
+        use crate::markdown::svg_rasterize::native_html_faces;
+
+        let mut database = resvg::usvg::fontdb::Database::new();
+        database
+            .load_font_file("/System/Library/Fonts/Times.ttc")
+            .map_err(|error| error.to_string())?;
+        let face = database.faces().next().ok_or("Times has no face")?;
+        let scope = native_html_faces::Scope::enter();
+        let alias = native_html_faces::register(face, None).ok_or("native alias unavailable")?;
+        let svg = format!(
+            "<g font-family=\"Times\"><text font-family=\"&quot;{alias}&quot;\">文</text></g>"
+        );
+        assert_eq!(HtmlFontRequest::from_markup(&svg).families, ["times"]);
+        drop(scope);
+        assert_eq!(
+            HtmlFontRequest::from_markup(&svg).families,
+            [alias, "times".into()]
+        );
+        Ok(())
+    }
 
     #[test]
     fn parses_css_and_bare_attribute_font_family_values() {
