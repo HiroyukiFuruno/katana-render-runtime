@@ -35,6 +35,24 @@ enum TestGlyph {
     Id(u32),
 }
 
+#[rstest]
+#[case(FONT, false)]
+#[case(SVG_FONT, true)]
+#[case(COLR_FONT, true)]
+#[case(CBDT_FONT, true)]
+#[case(SBIX_FONT, true)]
+fn glyph_capabilities_keep_supported_embedded_formats(
+    #[case] bytes: &[u8],
+    #[case] expected: bool,
+) -> TestResult<()> {
+    let (database, id) = fixture_database(bytes)?;
+    let capabilities = database
+        .glyph_capabilities(id)
+        .ok_or("fixture font capabilities unavailable")?;
+    assert_eq!(capabilities.has_embedded_glyphs, expected);
+    Ok(())
+}
+
 fn fixture_glyph(bytes: &[u8], glyph: TestGlyph) -> TestResult<usvg::GlyphId> {
     let id = match glyph {
         TestGlyph::Id(id) => id,

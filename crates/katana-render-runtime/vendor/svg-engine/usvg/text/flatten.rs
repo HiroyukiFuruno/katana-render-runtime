@@ -35,14 +35,14 @@ fn resolve_rendering_mode(text: &Text) -> ShapeRendering {
 /// that wasn't set explicitly. This matches browser behavior
 /// (CSS font-optical-sizing: auto).
 fn effective_variations(
-    cache: &mut Cache,
+    has_opsz_axis: bool,
     span: &layout::Span,
     glyph: &layout::PositionedGlyph,
 ) -> Vec<FontVariation> {
     let mut variations = span.variations.clone();
     if span.font_optical_sizing == crate::svg_engine::usvg::FontOpticalSizing::Auto
         && !variations.iter().any(|v| &v.tag == b"opsz")
-        && cache.has_opsz_axis(glyph.font)
+        && has_opsz_axis
     {
         variations.push(FontVariation::new(*b"opsz", glyph.font_size()));
     }
@@ -158,13 +158,20 @@ impl SpanFlattener<'_> {
         cache: &mut Cache,
         glyph_outline_fallback: Option<&GlyphOutlineFallbackFn<'_>>,
     ) {
-        let variations = effective_variations(cache, self.span, glyph);
-        if let Some(tree) = cache.fontdb_colr(glyph.font, glyph.id, &variations) {
+        let capabilities = cache.glyph_capabilities(glyph.font);
+        let variations = effective_variations(capabilities.has_opsz_axis, self.span, glyph);
+        if capabilities.has_embedded_glyphs
+            && let Some(tree) = cache.fontdb_colr(glyph.font, glyph.id, &variations)
+        {
             self.append_group(glyph.colr_transform(), Node::Group(Box::new(tree.root)));
-        } else if let Some(node) = cache.fontdb_svg(glyph.font, glyph.id) {
+        } else if capabilities.has_embedded_glyphs
+            && let Some(node) = cache.fontdb_svg(glyph.font, glyph.id)
+        {
             self.flush_outline();
             self.append_group(glyph.svg_transform(), node);
-        } else if let Some(image) = cache.fontdb_raster(glyph.font, glyph.id) {
+        } else if capabilities.has_embedded_glyphs
+            && let Some(image) = cache.fontdb_raster(glyph.font, glyph.id)
+        {
             self.flush_outline();
             let transform = bitmap_transform(&image, glyph);
             self.append_group(transform, Node::Image(Box::new(image.image)));
@@ -255,6 +262,19 @@ impl OutlinePen for PathBuilder {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct GlyphCapabilities {
+    pub(crate) has_opsz_axis: bool,
+    pub(crate) has_embedded_glyphs: bool,
+}
+
+impl GlyphCapabilities {
+    pub(crate) const UNKNOWN: Self = Self {
+        has_opsz_axis: false,
+        has_embedded_glyphs: true,
+    };
+}
+
 pub(crate) trait DatabaseExt {
     fn outline(
         &self,
@@ -262,7 +282,7 @@ pub(crate) trait DatabaseExt {
         glyph_id: GlyphId,
         variations: &[crate::svg_engine::usvg::FontVariation],
     ) -> Option<tiny_skia_path::Path>;
-    fn has_opsz_axis(&self, id: ID) -> bool;
+    fn glyph_capabilities(&self, id: ID) -> Option<GlyphCapabilities>;
     fn raster(&self, id: ID, glyph_id: GlyphId) -> Option<BitmapImage>;
     fn svg(&self, id: ID, glyph_id: GlyphId) -> Option<Node>;
     fn colr(
@@ -314,13 +334,17 @@ impl DatabaseExt for Database {
         })?
     }
 
-    fn has_opsz_axis(&self, id: ID) -> bool {
-        self.with_face_data(id, |data, face_index| -> Option<bool> {
+    fn glyph_capabilities(&self, id: ID) -> Option<GlyphCapabilities> {
+        self.with_face_data(id, |data, face_index| {
             let font = skrifa::FontRef::from_index(data, face_index).ok()?;
-            Some(font.axes().get_by_tag(OPSZ).is_some())
+            Some(GlyphCapabilities {
+                has_opsz_axis: font.axes().get_by_tag(OPSZ).is_some(),
+                has_embedded_glyphs: font.colr().is_ok()
+                    || font.svg().is_ok()
+                    || font.bitmap_strikes().format().is_some(),
+            })
         })
         .flatten()
-        .unwrap_or(false)
     }
 
     fn raster(&self, id: ID, glyph_id: GlyphId) -> Option<BitmapImage> {

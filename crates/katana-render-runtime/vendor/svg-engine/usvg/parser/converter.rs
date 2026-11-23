@@ -19,7 +19,7 @@ use super::units::{self, convert_length};
 use super::{Error, Options, marker};
 use crate::svg_engine::usvg::flatten::BitmapImage;
 use crate::svg_engine::usvg::parser::paint_server::process_paint;
-use crate::svg_engine::usvg::text::flatten::DatabaseExt;
+use crate::svg_engine::usvg::text::flatten::{DatabaseExt, GlyphCapabilities};
 use crate::svg_engine::usvg::*;
 
 #[derive(Clone)]
@@ -51,7 +51,7 @@ pub struct Cache {
     cache_colr: HashMap<(ID, GlyphId, Vec<FontVariation>), Option<Tree>>,
     cache_svg: HashMap<(ID, GlyphId), Option<Node>>,
     cache_raster: HashMap<(ID, GlyphId), Option<BitmapImage>>,
-    cache_has_opsz: HashMap<ID, bool>,
+    cache_glyph_capabilities: HashMap<ID, GlyphCapabilities>,
 
     pub clip_paths: HashMap<String, Arc<ClipPath>>,
     pub masks: HashMap<String, Arc<Mask>>,
@@ -98,7 +98,7 @@ impl Cache {
             cache_colr: HashMap::new(),
             cache_svg: HashMap::new(),
             cache_raster: HashMap::new(),
-            cache_has_opsz: HashMap::new(),
+            cache_glyph_capabilities: HashMap::new(),
 
             clip_paths: HashMap::new(),
             masks: HashMap::new(),
@@ -243,13 +243,16 @@ impl Cache {
         }
     }
 
-    pub(crate) fn has_opsz_axis(&mut self, font: ID) -> bool {
-        if let Some(&cached) = self.cache_has_opsz.get(&font) {
+    pub(crate) fn glyph_capabilities(&mut self, font: ID) -> GlyphCapabilities {
+        if let Some(&cached) = self.cache_glyph_capabilities.get(&font) {
             return cached;
         }
-        let has_opsz = self.fontdb.has_opsz_axis(font);
-        self.cache_has_opsz.insert(font, has_opsz);
-        has_opsz
+        let Some(capabilities) = self.fontdb.glyph_capabilities(font) else {
+            return GlyphCapabilities::UNKNOWN;
+        };
+        /* WHY: 埋め込み字形のない書体をglyphごとに再度開かない。 */
+        self.cache_glyph_capabilities.insert(font, capabilities);
+        capabilities
     }
 }
 
