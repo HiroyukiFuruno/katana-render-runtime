@@ -166,7 +166,10 @@ test("browser executable matching accepts the same inode and rejects a byte-iden
   fs.copyFileSync(argvPath, copyPath);
   const identity = physicalFileIdentity(argvPath);
   const linked = fs.statSync(osPath, { bigint: true });
-  expect([linked.dev.toString(), linked.ino.toString()]).toEqual([identity.dev, identity.ino]);
+  expect([linked.dev.toString(), linked.ino.toString()]).toEqual([
+    String(identity.dev),
+    String(identity.ino),
+  ]);
   const copy = physicalFileIdentity(copyPath);
   expect(copy.ino).not.toBe(identity.ino);
   expect(copy.sha256).toBe(identity.sha256);
