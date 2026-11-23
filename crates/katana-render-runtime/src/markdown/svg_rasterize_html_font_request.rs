@@ -165,12 +165,17 @@ mod tests {
     #[test]
     fn registered_native_alias_is_removed_from_the_discovery_request() -> Result<(), String> {
         use crate::markdown::svg_rasterize::native_html_faces;
+        use resvg::usvg::fontdb::Source;
+        use std::path::PathBuf;
 
         let mut database = resvg::usvg::fontdb::Database::new();
-        database
-            .load_font_file("/System/Library/Fonts/Times.ttc")
-            .map_err(|error| error.to_string())?;
-        let face = database.faces().next().ok_or("Times has no face")?;
+        let face_id = *database
+            .load_font_source(Source::File(PathBuf::from(
+                "/System/Library/Fonts/Times.ttc",
+            )))
+            .first()
+            .ok_or("Times has no face")?;
+        let face = database.face(face_id).ok_or("Times has no face")?;
         let scope = native_html_faces::Scope::enter();
         let alias = native_html_faces::register(face, None).ok_or("native alias unavailable")?;
         let svg = format!(

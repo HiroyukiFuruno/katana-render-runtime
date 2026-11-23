@@ -191,6 +191,18 @@ mod tests {
     }
 
     #[test]
+    fn fontconfig_uses_the_default_temporary_font_object_scope() {
+        let strategy = FontconfigFonts;
+        let calls = std::cell::Cell::new(0);
+        let result = strategy.with_temporary_font_objects(|| {
+            calls.set(calls.get() + 1);
+            "completed"
+        });
+        assert_eq!(result, "completed");
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
     fn default_platform_keeps_optional_families_unconfigured() {
         let strategy = DefaultPlatform;
         assert!(
