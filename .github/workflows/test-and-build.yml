@@ -299,7 +299,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ (inputs.verify_filter == 'exact-322486da' || contains(fromJSON('["exact-322486da-producer","exact-322486da-runtime-assets"]'), inputs.verify_filter)) && '322486daa47d622827c2eb738030bdc539cbb111' || github.sha }}
+          ref: ${{ (inputs.verify_filter == 'exact-57ece5de' || contains(fromJSON('["exact-57ece5de-producer","exact-57ece5de-runtime-assets"]'), inputs.verify_filter)) && '57ece5de4389752931a095089922b393ab84cf4b' || github.sha }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
@@ -314,19 +314,19 @@ jobs:
       - name: Install just for the shell recipe regression
         uses: taiki-e/install-action@4ccefd7d26b61bbb81f4ff01165e8a6880a1bd59 # just
       - name: Install Java runtime for exact CI task
-        if: contains(fromJSON('["exact-322486da-producer","exact-322486da-runtime-assets"]'), inputs.verify_filter)
+        if: contains(fromJSON('["exact-57ece5de-producer","exact-57ece5de-runtime-assets"]'), inputs.verify_filter)
         uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v5.0.0
         with:
           distribution: temurin
           java-version: "21"
       - name: Restore Linux Rust build cache
-        if: contains(fromJSON('["exact-322486da-producer","exact-322486da-runtime-assets"]'), inputs.verify_filter)
+        if: contains(fromJSON('["exact-57ece5de-producer","exact-57ece5de-runtime-assets"]'), inputs.verify_filter)
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: ci-v2-ubuntu-latest-stable-default
           save-if: false
       - name: Install Linux prerequisites for exact CI task
-        if: contains(fromJSON('["exact-322486da-producer","exact-322486da-runtime-assets"]'), inputs.verify_filter)
+        if: contains(fromJSON('["exact-57ece5de-producer","exact-57ece5de-runtime-assets"]'), inputs.verify_filter)
         run: |
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk graphviz libfontconfig-dev libfreetype-dev
@@ -335,10 +335,30 @@ jobs:
           "$RUNNER_TEMP/shellcheck-v0.11.0/shellcheck" --version | grep -Fx 'version: 0.11.0'
           echo "$RUNNER_TEMP/shellcheck-v0.11.0" >> "$GITHUB_PATH"
           python3 scripts/build/initialize_ci_capacity_state.py --root "$PWD"
+      - name: Install Google Chrome for independent HTML reference
+        if: inputs.verify_filter == 'exact-57ece5de-runtime-assets'
+        run: bunx playwright install --with-deps chrome chromium
+
+      - name: Install pinned ImageMagick for HTML comparison
+        if: inputs.verify_filter == 'exact-57ece5de-runtime-assets'
+        env:
+          IMAGEMAGICK_DIR: ${{ runner.temp }}/imagemagick
+        run: |
+          mkdir -p "$IMAGEMAGICK_DIR"
+          cd "$IMAGEMAGICK_DIR"
+          curl --fail --location --retry 3 --output imagemagick.AppImage https://github.com/ImageMagick/ImageMagick/releases/download/7.1.2-33/ImageMagick-7.1.2-33-gcc-x86_64.AppImage
+          printf '%s  %s\n' af598b07ab4dd8b8123623602dc9fc69d5e32185a36fd3739795a0deb02c1fb7 imagemagick.AppImage | sha256sum --check
+          chmod +x imagemagick.AppImage
+          ./imagemagick.AppImage --appimage-extract > /dev/null
+          mkdir -p bin
+          ln -s ../squashfs-root/AppRun bin/magick
+          echo "$IMAGEMAGICK_DIR/bin" >> "$GITHUB_PATH"
+          bin/magick -version
+
       - name: Verify generated asset fingerprints and RTK recipes
         env:
           KRR_VALIDATION_MODE: ${{ inputs.verify_filter }}
-          KRR_VALIDATION_HEAD: ${{ (inputs.verify_filter == 'exact-322486da' || contains(fromJSON('["exact-322486da-producer","exact-322486da-runtime-assets"]'), inputs.verify_filter)) && '322486daa47d622827c2eb738030bdc539cbb111' || github.sha }}
+          KRR_VALIDATION_HEAD: ${{ (inputs.verify_filter == 'exact-57ece5de' || contains(fromJSON('["exact-57ece5de-producer","exact-57ece5de-runtime-assets"]'), inputs.verify_filter)) && '57ece5de4389752931a095089922b393ab84cf4b' || github.sha }}
           MOON_CONCURRENCY: "1"
         run: |
           test "$(git rev-parse HEAD)" = "$KRR_VALIDATION_HEAD"
@@ -346,9 +366,9 @@ jobs:
           uv venv --python 3.13 "$RUNNER_TEMP/krr-asset-python"
           uv pip sync --python "$RUNNER_TEMP/krr-asset-python/bin/python3" --require-hashes scripts/release/html-performance-requirements.lock
           export PATH="$RUNNER_TEMP/krr-asset-python/bin:$PATH"
-          if [[ "$KRR_VALIDATION_MODE" == "exact-322486da-producer" || "$KRR_VALIDATION_MODE" == "exact-322486da-runtime-assets" ]]; then
+          if [[ "$KRR_VALIDATION_MODE" == "exact-57ece5de-producer" || "$KRR_VALIDATION_MODE" == "exact-57ece5de-runtime-assets" ]]; then
             test_exit=0
-            if [[ "$KRR_VALIDATION_MODE" == "exact-322486da-runtime-assets" ]]; then
+            if [[ "$KRR_VALIDATION_MODE" == "exact-57ece5de-runtime-assets" ]]; then
               just plantuml-install
               just runtime-bundle-package-check
               just plantuml-runtime-package-check
@@ -382,7 +402,7 @@ jobs:
           PY
             fi
             exit "$test_exit"
-          elif [[ "$KRR_VALIDATION_MODE" == "exact-322486da" ]]; then
+          elif [[ "$KRR_VALIDATION_MODE" == "exact-57ece5de" ]]; then
             bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-validation-contract_test.ts
           else
             bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-validation-contract_test.ts -t 'generated Rust fingerprint binds added paths and restores after removal|Just RTK proxy prefixes render correctly'
