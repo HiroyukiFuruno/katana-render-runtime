@@ -11,8 +11,10 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import native_coverage_local_anchor as anchor
+import runtime_script_junit_outputs as junit_outputs
 import runtime_script_producer as producer
 import runtime_script_profiles as profiles
 import runtime_script_recipe as recipe
@@ -20,6 +22,66 @@ import runtime_script_result_verify as result_verify
 
 
 class RuntimeScriptProducerTests(unittest.TestCase):
+    def test_failed_case_projection_is_bounded_and_omits_failure_text(self) -> None:
+        data = b"""<testsuites><testsuite file=\"scripts/runtime-bundles/one_test.ts\">
+          <testcase classname=\"Runtime\" name=\"producer\"><failure message=\"secret value\">assert(1)</failure></testcase>
+        </testsuite></testsuites>"""
+        projection = producer._failed_case_projection(
+            data, ("scripts/runtime-bundles/one_test.ts",)
+        )
+        self.assertEqual(projection, "scripts/runtime-bundles/one_test.ts::producer")
+        self.assertNotIn("secret value", projection or "")
+        self.assertIsNone(producer._failed_case_projection(b"not xml", ("one.ts",)))
+
+    def test_failed_later_group_uses_its_junit_path(self) -> None:
+        with self._repo() as directory:
+            repo = Path(directory).resolve()
+            second = repo / "scripts/runtime-bundles/two_test.ts"
+            second.write_text(
+                'import { expect, test } from "bun:test";\n'
+                'test("later", () => expect(1).toBe(2));\n',
+                encoding="utf-8",
+            )
+            first_command = (
+                "bun", "test", "--path-ignore-patterns", "tmp/**",
+                "./scripts/runtime-bundles/one_test.ts",
+            )
+            second_command = (
+                "bun", "test", "--path-ignore-patterns", "tmp/**",
+                "./scripts/runtime-bundles/two_test.ts",
+            )
+            recipe_value = recipe.RuntimeScriptRecipe(
+                "runtime-unused-script-regression-run", "a" * 64,
+                (first_command, second_command),
+            )
+            second_report = b"""<testsuites><testsuite file="scripts/runtime-bundles/two_test.ts">
+              <testcase name="later"><failure>hidden</failure></testcase>
+            </testsuite></testsuites>"""
+            original_read_output = junit_outputs.read_output
+
+            def read_output(
+                repo_path: Path,
+                relative: str,
+                producer_name: str,
+                suffix: str,
+                epoch: str | None = None,
+            ) -> bytes:
+                if relative.endswith("-group-002.xml"):
+                    return second_report
+                return original_read_output(
+                    repo_path, relative, producer_name, suffix, epoch
+                )
+
+            with mock.patch.object(
+                junit_outputs, "read_output", side_effect=read_output
+            ), self.assertRaisesRegex(
+                producer.RuntimeScriptProducerError,
+                r"failed cases: scripts/runtime-bundles/two_test\.ts::later",
+            ):
+                producer.run_runtime_script(
+                    repo, "runtime-unused-script-regression", "b" * 64, recipe_value
+                )
+
     @unittest.skipUnless(os.name == "posix", "SIGTERM requires POSIX signal delivery")
     def test_sigterm_reaps_child_and_releases_profile_lease(self) -> None:
         with self._repo() as directory:
@@ -299,13 +361,18 @@ class RuntimeScriptProducerTests(unittest.TestCase):
                 'test("producer", () => expect(1).toBe(2));\n',
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(producer.RuntimeScriptProducerError, "exit 1"):
+            with self.assertRaises(producer.RuntimeScriptProducerError) as raised:
                 producer.run_runtime_script(
                     repo,
                     "runtime-unused-script-regression",
                     "b" * 64,
                     self._recipe(),
                 )
+            self.assertIn("Bun producer failed with exit 1", str(raised.exception))
+            self.assertIn(
+                "scripts/runtime-bundles/one_test.ts::producer", str(raised.exception)
+            )
+            self.assertNotIn("expect(1).toBe(2)", str(raised.exception))
             self.assertFalse(
                 anchor.verify(
                     repo,

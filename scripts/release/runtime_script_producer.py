@@ -7,6 +7,7 @@ import os
 import secrets
 import stat
 import subprocess
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -34,6 +35,11 @@ class RuntimeScriptRun:
 
 class RuntimeScriptProducerError(RuntimeError):
     """Raised when a fixed runtime-script producer cannot be trusted."""
+
+
+_MAX_FAILED_CASES = 8
+_MAX_IDENTIFIER_LENGTH = 160
+_MAX_FAILURE_PROJECTION_LENGTH = 2048
 
 
 def _ensure_directory(path: Path) -> None:
@@ -135,6 +141,48 @@ def _expected_files(argv: tuple[str, ...], producer: str) -> tuple[str, ...]:
     return tuple(path.removeprefix("./") for path in files)
 
 
+def _failed_case_projection(
+    data: bytes, expected_files: tuple[str, ...]
+) -> str | None:
+    """Return bounded testcase identifiers without exposing failure details."""
+    try:
+        junit.parse_junit(data, expected_files=expected_files)
+        root = ET.fromstring(data)
+    except (ET.ParseError, junit.RuntimeScriptJUnitError):
+        return None
+    failed: list[str] = []
+    expected = {path.removeprefix("./") for path in expected_files}
+    for suite in root.iter("testsuite"):
+        suite_file = suite.get("file")
+        if not isinstance(suite_file, str):
+            continue
+        suite_file = suite_file.removeprefix("./")
+        if suite_file not in expected:
+            continue
+        for case in suite.findall("testcase"):
+            if not (case.findall("failure") or case.findall("error")):
+                continue
+            name = case.get("name")
+            if not isinstance(name, str):
+                continue
+            name = name.strip()
+            if (
+                not name
+                or len(name) > _MAX_IDENTIFIER_LENGTH
+                or any(not character.isprintable() for character in name)
+            ):
+                continue
+            failed.append(f"{suite_file}::{name}")
+            if len(failed) == _MAX_FAILED_CASES:
+                break
+        if len(failed) == _MAX_FAILED_CASES:
+            break
+    if not failed:
+        return None
+    projection = ",".join(failed)
+    return projection[:_MAX_FAILURE_PROJECTION_LENGTH]
+
+
 def run_runtime_script(
     repo: Path,
     producer: str,
@@ -228,7 +276,17 @@ def run_runtime_script(
                 except junit.RuntimeScriptJUnitError as error:
                     raise RuntimeScriptProducerError(str(error)) from error
         if process_exit != 0:
-            raise RuntimeScriptProducerError(f"Bun producer failed with exit {process_exit}")
+            failure = f"Bun producer failed with exit {process_exit}"
+            try:
+                staged = junit_outputs.read_output(
+                    repo, plan.paths[index - 1], producer, ".xml", plan.epoch
+                )
+                projection = _failed_case_projection(staged, expected)
+            except (OSError, ValueError):
+                projection = None
+            if projection is not None:
+                failure += f"; failed cases: {projection}"
+            raise RuntimeScriptProducerError(failure)
         interrupt.raise_if_interrupted()
         reports = tuple(junit_publish.publish_current_reports(repo, plan, process_exit))
         receipt = result.make_receipt(producer, identity_sha256, epoch, list(reports), process_exit)
