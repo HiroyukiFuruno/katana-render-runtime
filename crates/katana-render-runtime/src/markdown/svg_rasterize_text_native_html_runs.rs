@@ -133,12 +133,7 @@ impl<'a> SelectionQuery<'a> {
         let Some(selected) = memo.selection(self, ch) else {
             return RunFace::Existing(old_id);
         };
-        let old = self.database.face(old_id);
-        let new = selected.database.face(selected.id);
-        if reuse_existing_source(old, new, &selected.variations) {
-            return RunFace::Existing(old_id);
-        }
-        RunFace::Native(selected)
+        choose_selected_face(old_id, self.database.face(old_id), selected)
     }
 
     fn native_base(&self) -> NativeHtmlFallbackBase<'_> {
@@ -153,17 +148,22 @@ impl<'a> SelectionQuery<'a> {
     }
 }
 
-fn reuse_existing_source(
+fn choose_selected_face(
+    old_id: ID,
     old: Option<&FaceInfo>,
-    new: Option<&FaceInfo>,
-    variations: &[resvg::usvg::FontVariation],
-) -> bool {
-    matches!((old, new), (Some(a), Some(b))
-        if variations.is_empty()
+    selected: Arc<SelectedFace>,
+) -> RunFace {
+    let new = selected.database.face(selected.id);
+    /* WHY: 同じ書体の検証済み共有mappingでだけ、未共有の元faceを置き換える。 */
+    if matches!((old, new), (Some(a), Some(b))
+        if selected.variations.is_empty()
             && a.index == b.index
             && source_path(a) == source_path(b)
-            /* WHY: 既存faceが共有済み、またはselected faceが未共有ならalias化してもmmapを減らせない。 */
             && (is_shared_source(a) || !is_shared_source(b)))
+    {
+        return RunFace::Existing(old_id);
+    }
+    RunFace::Native(selected)
 }
 
 fn is_shared_source(face: &FaceInfo) -> bool {

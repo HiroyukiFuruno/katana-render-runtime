@@ -53,10 +53,15 @@ fn system_ui_paths() -> Option<BTreeSet<PathBuf>> {
             CTFontSymbolicTraits::ItalicTrait,
             CTFontSymbolicTraits::ItalicTrait,
         )
-    }?;
+    };
+    system_ui_path_set(&regular, italic.as_deref())
+}
+
+fn system_ui_path_set(regular: &CTFont, italic: Option<&CTFont>) -> Option<BTreeSet<PathBuf>> {
+    let italic = italic?;
     [
-        system_ui_font_path(&regular, REGULAR_NAME, Path::new(REGULAR_PATH), false),
-        system_ui_font_path(&italic, ITALIC_NAME, Path::new(ITALIC_PATH), true),
+        system_ui_font_path(regular, REGULAR_NAME, Path::new(REGULAR_PATH), false),
+        system_ui_font_path(italic, ITALIC_NAME, Path::new(ITALIC_PATH), true),
     ]
     .into_iter()
     .collect()
@@ -141,7 +146,7 @@ fn descriptor_path(descriptor: &CTFontDescriptor) -> Option<PathBuf> {
 mod tests {
     use super::{
         BTreeSet, Path, PathBuf, REGULAR_NAME, REGULAR_PATH, family_paths, registered_family_paths,
-        resolve_paths, system_ui_font, system_ui_font_path, system_ui_paths,
+        resolve_paths, system_ui_font, system_ui_font_path, system_ui_path_set, system_ui_paths,
     };
 
     #[test]
@@ -173,6 +178,13 @@ mod tests {
         assert!(system_ui_font_path(&font, "Other Face", path, false).is_none());
         assert!(system_ui_font_path(&font, REGULAR_NAME, path, true).is_none());
         assert!(system_ui_font_path(&font, REGULAR_NAME, Path::new("other.ttf"), false).is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn system_font_fast_path_rejects_a_missing_italic_font() -> Result<(), &'static str> {
+        let regular = system_ui_font().ok_or("CoreText system font missing")?;
+        assert!(system_ui_path_set(&regular, None).is_none());
         Ok(())
     }
 }
