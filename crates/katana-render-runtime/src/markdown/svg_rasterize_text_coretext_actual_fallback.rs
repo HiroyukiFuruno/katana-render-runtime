@@ -1,7 +1,8 @@
 use super::font_identity;
+#[cfg(test)]
 use crate::markdown::svg_rasterize::font::platform::INTERFACE_BOLD_WEIGHT;
 use objc2_core_foundation::{CFDictionary, CFNumber, CFRange, CFRetained, CFString};
-use objc2_core_text::{CTFont, CTFontUIFontType};
+use objc2_core_text::CTFont;
 use resvg::usvg::fontdb::{Database, FaceInfo, ID};
 use std::collections::BTreeMap;
 
@@ -12,14 +13,16 @@ pub(in crate::markdown::svg_rasterize) use font_identity::{
 #[path = "svg_rasterize_text_coretext_scaler.rs"]
 mod scaler;
 
-const NORMAL_FONT_WEIGHT: u16 = 400;
 const MAX_EXPLICIT_VARIATIONS: usize = 16;
 const OPENTYPE_TAG_BYTES: usize = 4;
 
-pub(in crate::markdown::svg_rasterize) enum NativeHtmlFallbackBase<'a> {
-    SystemUi,
-    FileBackedSelectedFace { database: &'a Database, id: ID },
-}
+#[path = "svg_rasterize_text_coretext_localized_fallback.rs"]
+mod localized;
+#[cfg(test)]
+pub(in crate::markdown::svg_rasterize) use localized::native_html_fallback;
+pub(in crate::markdown::svg_rasterize) use localized::{
+    NativeHtmlFallbackBase, NativeHtmlFallbackQuery,
+};
 
 pub(in crate::markdown::svg_rasterize) struct NativeHtmlFallback {
     pub(in crate::markdown::svg_rasterize) font: CFRetained<CTFont>,
@@ -67,55 +70,8 @@ pub(super) fn default_fallback_font(
     Some(fallback_for_string(&base, character))
 }
 
-pub(in crate::markdown::svg_rasterize) fn native_html_fallback(
-    base: NativeHtmlFallbackBase<'_>,
-    character: char,
-    size: f64,
-    weight: u16,
-    effective_lang: Option<&str>,
-) -> Option<NativeHtmlFallback> {
-    let language = effective_lang
-        .filter(|value| !value.is_empty())
-        .map(CFString::from_str);
-    let base = native_html_base_font(base, size, weight, language.as_deref())?;
-    let font = fallback_for_string_with_language(&base, character, language.as_deref());
-    Some(NativeHtmlFallback {
-        explicit_variations: explicit_variations(&font)?,
-        font,
-    })
-}
-
-fn native_html_base_font(
-    base: NativeHtmlFallbackBase<'_>,
-    size: f64,
-    weight: u16,
-    language: Option<&CFString>,
-) -> Option<CFRetained<CTFont>> {
-    valid_size(size)?;
-    match base {
-        NativeHtmlFallbackBase::SystemUi => system_ui_font(size, weight, language),
-        NativeHtmlFallbackBase::FileBackedSelectedFace { database, id } => {
-            named_base_font(database, id, size)
-        }
-    }
-}
-
 fn valid_size(size: f64) -> Option<()> {
     (size.is_finite() && size > 0.0).then_some(())
-}
-
-fn system_ui_font(
-    size: f64,
-    weight: u16,
-    language: Option<&CFString>,
-) -> Option<CFRetained<CTFont>> {
-    let kind = match weight {
-        NORMAL_FONT_WEIGHT => CTFontUIFontType::System,
-        INTERFACE_BOLD_WEIGHT => CTFontUIFontType::EmphasizedSystem,
-        _ => return None,
-    };
-    /* WHY: UI種別をCoreTextへ渡し、OSごとの実際のsystem-uiを選ばせる。 */
-    unsafe { CTFont::new_ui_font_for_language(kind, size, language) }
 }
 
 fn named_base_font(database: &Database, id: ID, size: f64) -> Option<CFRetained<CTFont>> {
@@ -134,17 +90,6 @@ fn fallback_for_string(font: &CTFont, character: char) -> CFRetained<CTFont> {
     let range = full_range(&text);
     /* WHY: CFStringのUTF-16長を使い、補助平面文字も範囲に収める。 */
     unsafe { font.for_string(&text, range) }
-}
-
-fn fallback_for_string_with_language(
-    font: &CTFont,
-    character: char,
-    language: Option<&CFString>,
-) -> CFRetained<CTFont> {
-    let text = CFString::from_str(&character.to_string());
-    let range = full_range(&text);
-    /* WHY: languageはHTML側で確定したものだけをCoreText fallbackへ渡す。 */
-    unsafe { font.for_string_with_language(&text, range, language) }
 }
 
 fn full_range(text: &CFString) -> CFRange {

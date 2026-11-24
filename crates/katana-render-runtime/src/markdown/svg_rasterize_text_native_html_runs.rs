@@ -1,11 +1,13 @@
 use super::family_runs::candidates::specified_family_faces;
 use super::family_runs::resolved_font_runs;
 use super::font::matching_font_face;
-use super::font::platform_fallback::actual_fallback::NativeHtmlFallbackBase;
+use super::font::platform_fallback::actual_fallback::{
+    NativeHtmlFallbackBase, NativeHtmlFallbackQuery,
+};
 use super::html_font_db_for_measured_text;
 use crate::markdown::svg_rasterize::{HtmlFontStyle, HtmlPaintFontRun, font, native_html_faces};
 use resvg::usvg::fontdb::{Database, FaceInfo, ID, Source};
-use std::{path::Path, sync::Arc};
+use std::{cell::OnceCell, path::Path, sync::Arc};
 
 #[path = "svg_rasterize_text_native_html_run_memo.rs"]
 mod memo;
@@ -81,6 +83,7 @@ struct SelectionQuery<'a> {
     base: ID,
     system_ui: bool,
     key: SelectionKey,
+    native: OnceCell<Option<NativeHtmlFallbackQuery>>,
 }
 
 impl<'a> SelectionQuery<'a> {
@@ -96,6 +99,7 @@ impl<'a> SelectionQuery<'a> {
             database,
             base,
             system_ui,
+            native: OnceCell::new(),
             key: SelectionKey {
                 base: base_name,
                 size: super::effective_html_font_size(style.size).to_bits(),
@@ -152,6 +156,20 @@ impl<'a> SelectionQuery<'a> {
                 id: self.base,
             }
         }
+    }
+
+    fn native_query(&self) -> Option<&NativeHtmlFallbackQuery> {
+        /* WHY: 同じ文字列の代替書体を探す間、CoreTextで検証済みの主書体を使う。 */
+        self.native
+            .get_or_init(|| {
+                NativeHtmlFallbackQuery::new(
+                    self.native_base(),
+                    f64::from(f32::from_bits(self.key.size)),
+                    self.key.weight,
+                    self.key.language.as_deref(),
+                )
+            })
+            .as_ref()
     }
 }
 

@@ -1,5 +1,5 @@
 use super::super::super::font::platform_fallback::actual_fallback::{
-    ActualCoreTextFace, NativeHtmlFallbackBase, actual_face_for,
+    ActualCoreTextFace, NativeHtmlFallbackBase, actual_face_for, native_html_fallback,
 };
 use super::super::super::harfrust::MappedFontBytes;
 use super::super::SelectionQuery;
@@ -7,8 +7,7 @@ use super::super::test_support::{FONT_SIZE, REGULAR_WEIGHT, roboto_flex};
 use super::files::{FileFace, name_table_digest, verified_database};
 use super::{
     Arc, HashMap, MAX_GLYPH_QUERIES, MAX_PHYSICAL_FONTS, MAX_STYLE_QUERIES, Memo, SelectionKey,
-    actual_font_metadata_for, native_html_fallback, observe_path_stamp, selected_face,
-    with_current,
+    actual_font_metadata_for, observe_path_stamp, selected_face, with_current,
 };
 use crate::markdown::svg_rasterize::HtmlFontFrameCache;
 use crate::markdown::svg_rasterize::font_file_fixture::FontFileFixture;
@@ -80,6 +79,7 @@ fn system_query(database: &Database) -> SelectionQuery<'_> {
         database,
         base: ID::dummy(),
         system_ui: true,
+        native: std::cell::OnceCell::new(),
         key: selection_key(),
     }
 }

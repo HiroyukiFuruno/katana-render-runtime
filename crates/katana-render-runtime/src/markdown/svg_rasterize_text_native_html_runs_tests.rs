@@ -3,7 +3,7 @@ use super::test_support::{
 };
 use super::{Arc, Database, ID, Memo, Run, RunFace, RunPlan, SelectionKey, SelectionQuery};
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
-use std::error::Error;
+use std::{cell::OnceCell, error::Error};
 
 #[test]
 fn unsupported_native_fallback_keeps_the_existing_cjk_run_and_memoizes_the_miss() {
@@ -13,6 +13,7 @@ fn unsupported_native_fallback_keeps_the_existing_cjk_run_and_memoizes_the_miss(
         database: &database,
         base: old_id,
         system_ui: true,
+        native: OnceCell::new(),
         key: SelectionKey {
             base: "System Font".into(),
             size: FONT_SIZE.to_bits(),
@@ -26,6 +27,30 @@ fn unsupported_native_fallback_keeps_the_existing_cjk_run_and_memoizes_the_miss(
             matches!(query.select(&mut memo, '装', old_id, &[]), RunFace::Existing(id) if id == old_id)
         );
     }
+}
+
+#[test]
+fn native_fallback_reuses_one_base_query_for_different_characters() -> Result<(), Box<dyn Error>> {
+    let database = Database::new();
+    let query = SelectionQuery {
+        database: &database,
+        base: ID::dummy(),
+        system_ui: true,
+        native: OnceCell::new(),
+        key: SelectionKey {
+            base: "System Font".into(),
+            size: FONT_SIZE.to_bits(),
+            weight: 400,
+            language: Some("ja".into()),
+        },
+    };
+    assert!(query.native.get().is_none());
+    let first = query.native_query().ok_or("native base font unavailable")?;
+    assert!(first.select('骨').is_some());
+    let second = query.native_query().ok_or("native base font unavailable")?;
+    assert!(std::ptr::eq(first, second));
+    assert!(second.select('実').is_some());
+    Ok(())
 }
 
 #[test]

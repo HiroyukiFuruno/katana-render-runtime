@@ -1,5 +1,5 @@
 use super::super::font::platform_fallback::actual_fallback::{
-    ActualCoreTextFontMetadata, NativeHtmlFallback, actual_font_metadata_for, native_html_fallback,
+    ActualCoreTextFontMetadata, NativeHtmlFallback, actual_font_metadata_for,
 };
 use super::super::font::{FileStamp, observe_path_stamp};
 use super::SelectionQuery;
@@ -97,13 +97,7 @@ impl Memo {
     }
 
     fn lookup(&mut self, query: &SelectionQuery<'_>, ch: char) -> Option<SelectedFace> {
-        let result = native_html_fallback(
-            query.native_base(),
-            ch,
-            f64::from(f32::from_bits(query.key.size)),
-            query.key.weight,
-            query.key.language.as_deref(),
-        )?;
+        let result = query.native_query()?.select(ch)?;
         let file = self.physical_face(&result.font)?;
         selected_face(file, result, ch)
     }
