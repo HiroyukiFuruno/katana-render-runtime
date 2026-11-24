@@ -299,7 +299,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.verify_filter == 'exact-f5b35ac5' && 'f5b35ac53dcb7a9aa146bf647c368fa6a9689e6b' || github.sha }}
+          ref: ${{ inputs.verify_filter == 'exact-322486da' && '322486daa47d622827c2eb738030bdc539cbb111' || github.sha }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
@@ -315,7 +315,7 @@ jobs:
       - name: Verify generated asset fingerprints and RTK recipes
         env:
           KRR_VALIDATION_MODE: ${{ inputs.verify_filter }}
-          KRR_VALIDATION_HEAD: ${{ inputs.verify_filter == 'exact-f5b35ac5' && 'f5b35ac53dcb7a9aa146bf647c368fa6a9689e6b' || github.sha }}
+          KRR_VALIDATION_HEAD: ${{ inputs.verify_filter == 'exact-322486da' && '322486daa47d622827c2eb738030bdc539cbb111' || github.sha }}
           MOON_CONCURRENCY: "1"
         run: |
           test "$(git rev-parse HEAD)" = "$KRR_VALIDATION_HEAD"
@@ -323,7 +323,7 @@ jobs:
           uv venv --python 3.13 "$RUNNER_TEMP/krr-asset-python"
           uv pip sync --python "$RUNNER_TEMP/krr-asset-python/bin/python3" --require-hashes scripts/release/html-performance-requirements.lock
           export PATH="$RUNNER_TEMP/krr-asset-python/bin:$PATH"
-          if [[ "$KRR_VALIDATION_MODE" == "exact-f5b35ac5" ]]; then
+          if [[ "$KRR_VALIDATION_MODE" == "exact-322486da" ]]; then
             bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-validation-contract_test.ts
           else
             bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-validation-contract_test.ts -t 'generated Rust fingerprint binds added paths and restores after removal|Just RTK proxy prefixes render correctly'
