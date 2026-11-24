@@ -133,7 +133,14 @@ impl<'a> SelectionQuery<'a> {
         let Some(selected) = memo.selection(self, ch) else {
             return RunFace::Existing(old_id);
         };
-        choose_selected_face(old_id, self.database.face(old_id), selected)
+        let old = self.database.face(old_id);
+        let new = selected.database.face(selected.id);
+        if selected.variations.is_empty()
+            && matches!((old, new), (Some(a), Some(b)) if a.index == b.index && source_path(a) == source_path(b))
+        {
+            return RunFace::Existing(old_id);
+        }
+        RunFace::Native(selected)
     }
 
     fn native_base(&self) -> NativeHtmlFallbackBase<'_> {
@@ -146,28 +153,6 @@ impl<'a> SelectionQuery<'a> {
             }
         }
     }
-}
-
-fn choose_selected_face(
-    old_id: ID,
-    old: Option<&FaceInfo>,
-    selected: Arc<SelectedFace>,
-) -> RunFace {
-    let new = selected.database.face(selected.id);
-    /* WHY: 同じ書体の検証済み共有mappingでだけ、未共有の元faceを置き換える。 */
-    if matches!((old, new), (Some(a), Some(b))
-        if selected.variations.is_empty()
-            && a.index == b.index
-            && source_path(a) == source_path(b)
-            && (is_shared_source(a) || !is_shared_source(b)))
-    {
-        return RunFace::Existing(old_id);
-    }
-    RunFace::Native(selected)
-}
-
-fn is_shared_source(face: &FaceInfo) -> bool {
-    matches!(face.source, resvg::usvg::fontdb::Source::SharedFile(_, _))
 }
 
 fn same_run_face(left: &RunFace, right: &RunFace) -> bool {
