@@ -107,6 +107,7 @@ export function verifyManagedProcessEnvironment(receipt: ManagedReceipt): string
     "TMPDIR",
     "SHELL",
     "RUSTFLAGS",
+    "RUSTUP_TOOLCHAIN",
     "CARGO",
     "CARGO_BUILD_JOBS",
     "TEST_THREADS",

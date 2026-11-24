@@ -201,6 +201,7 @@ export function createManagedReaderInputs(withJustDispatcher = false) {
     _: python,
     SHLVL: "0",
     RUSTFLAGS: "-D warnings",
+    RUSTUP_TOOLCHAIN: "1.99.1",
     CARGO: `${path.join(launcherDirectory, "rtk")} proxy cargo`,
     CARGO_BUILD_JOBS: "2",
     TEST_THREADS: "2",
