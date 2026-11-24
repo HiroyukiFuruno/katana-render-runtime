@@ -17,6 +17,9 @@ def environment_comparison(previous: list[gate.JsonObject],
                            actual: gate.JsonObject) -> gate.JsonObject:
     gate.require(len(previous) == 50, "original 50 worker observations required")
     old = previous[0]
+    for observation in (old, actual):
+        gate.digest(observation.get("nonMetadataEnvironmentSha256"))
+        gate.digest(observation.get("keyNamesSha256"))
     for row in previous:
         gate.require(row.get("schema") == "krr-html-worker-runtime-execution-v1"
                      and row.get("nonMetadataEnvironmentSha256") == old.get("nonMetadataEnvironmentSha256")
@@ -36,6 +39,18 @@ def environment_comparison(previous: list[gate.JsonObject],
             "diagnosticKeyNamesSha256": actual["keyNamesSha256"]}
 
 
+def legacy_environment_comparison(receipt_schema: object,
+                                  previous: list[gate.JsonObject]) -> gate.JsonObject:
+    gate.require(receipt_schema == producer.BATCH_RECEIPT_SCHEMA_V2,
+                 "legacy environment comparison requires a v2 receipt")
+    gate.require(len(previous) == 50, "original 50 worker observations required")
+    gate.require(all("runtimeExecution" not in row for row in previous),
+                 "legacy worker observations must omit runtime execution")
+    return {"originalRuntimeExecution": "unavailable-legacy-v2",
+            "environmentComparability": "not-established",
+            "originalEnvironmentValuesAvailable": False}
+
+
 def run(root: Path, output: Path, batch: Path, batch_sha256: str,
         origin: producer.FixedEpochContextInput, condition_id: str) -> None:
     os.environ["GIT_OPTIONAL_LOCKS"] = "0"
@@ -45,8 +60,9 @@ def run(root: Path, output: Path, batch: Path, batch_sha256: str,
     gate.require(gate.sha256(batch / "batch-receipt.json") == batch_sha256,
                  "batch receipt SHA differs")
     receipt = gate.read_json(batch / "batch-receipt.json")
-    gate.require(receipt.get("schema") in (producer.BATCH_RECEIPT_SCHEMA,
-                                          producer.BATCH_RECEIPT_SCHEMA_V2)
+    receipt_schema = receipt.get("schema")
+    gate.require(receipt_schema in (producer.BATCH_RECEIPT_SCHEMA,
+                                    producer.BATCH_RECEIPT_SCHEMA_V2)
                  and receipt.get("status") == "closed", "closed batch required")
     bundle_pin = gate._object(receipt.get("bundle"), "batch bundle")
     bundle_path = batch / "bundle" / "bundle.json"
@@ -103,12 +119,19 @@ def run(root: Path, output: Path, batch: Path, batch_sha256: str,
             gate.require(record == {key: value for key, value in worker_record.items()
                                     if key != "attemptRecord"}, "worker attempt differs")
             if record.get("accepted") is True:
-                projection = gate._object(record.get("runtimeExecution"), "worker runtime")
-                gate.require(projection.get("schema") == "krr-html-worker-runtime-execution-v1",
-                             "original worker runtime schema differs")
-                previous.append(projection)
+                previous.append(record)
     gate.require(len(previous) == 50, "original 50 worker observations required")
-    environment_comparison(previous, previous[0])
+    legacy_environment = (legacy_environment_comparison(receipt_schema, previous)
+                          if receipt_schema == producer.BATCH_RECEIPT_SCHEMA_V2
+                          and all("runtimeExecution" not in row for row in previous) else None)
+    previous_runtime: list[gate.JsonObject] = []
+    if legacy_environment is None:
+        for record in previous:
+            projection = gate._object(record.get("runtimeExecution"), "worker runtime")
+            gate.require(projection.get("schema") == "krr-html-worker-runtime-execution-v1",
+                         "original worker runtime schema differs")
+            previous_runtime.append(projection)
+        environment_comparison(previous_runtime, previous_runtime[0])
     output.mkdir(parents=True)
     lifecycle = output / "lifecycle"
     worker = producer.ArmBuildResult([], binary, fixed.binary_sha256, proof, [])
@@ -161,9 +184,12 @@ def run(root: Path, output: Path, batch: Path, batch_sha256: str,
                 gate.require(all(observed.get(key) == value for key, value in projection.items()),
                              "diagnostic worker environments differ")
     producer.write_exclusive(output / "diagnostic-result.json", {
-        "schema": "krr-html-same-binary-diagnostic-v1", "formalAccepted": False,
+        "schema": ("krr-html-same-binary-diagnostic-v2" if legacy_environment is not None
+                   else "krr-html-same-binary-diagnostic-v1"),
+        "formalAccepted": False,
         "conditionId": condition_id, "worker": binary_pin, "sourceHead": origin["head"],
         "sourceSnapshotSha256": fixed.snapshot_sha256, "lockSha256": fixed.lock_sha256,
         "phaseRecords": collected.actual_phase_records, "tests": tests,
-        **environment_comparison(previous, projection),
+        **(legacy_environment if legacy_environment is not None
+           else environment_comparison(previous_runtime, projection)),
     })
