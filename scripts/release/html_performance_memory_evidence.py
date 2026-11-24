@@ -97,8 +97,47 @@ def evaluate_paired(
         result = memory.evaluate_peak_phase(base_rss, candidate_rss, base_time, candidate_time,
                                             policy_version=policy_version)
         phases[phase] = asdict(result)
+    if policy_version == memory.INCREMENTAL_RSS_POLICY_VERSION:
+        cold = gate._object(phases["cold_open"], "cold open result")
+        _, base_cold = _phase_values(baseline, "cold_open", no_scroll=False)
+        _, candidate_cold = _phase_values(candidate, "cold_open", no_scroll=False)
+        for phase in gate.PHASES:
+            if phase == "cold_open":
+                continue
+            phase_result = gate._object(phases[phase], "phase result")
+            _, base_peaks = _phase_values(baseline, phase, no_scroll=False)
+            _, candidate_peaks = _phase_values(candidate, phase, no_scroll=False)
+            differences = [
+                (candidate_peak - candidate_initial) - (base_peak - base_initial)
+                for base_peak, base_initial, candidate_peak, candidate_initial in zip(
+                    base_peaks, base_cold, candidate_peaks, candidate_cold, strict=True
+                )
+            ]
+            bounded = all(
+                gate._number(gate._object(phase_result[key], "peak delta")["delta_bytes"], "delta bytes") <= memory.MAX_PEAK_BYTES
+                and gate._number(gate._object(phase_result[key], "peak delta")["delta_ratio"], "delta ratio") <= memory.MAX_PEAK_RATIO
+                for key in ("median", "p95", "maximum")
+            )
+            increments_valid = all(
+                base_peak >= base_initial and candidate_peak >= candidate_initial
+                and difference <= min(memory.SMALL_PEAK_BYTES, base_peak * memory.SMALL_PEAK_RATIO)
+                for base_peak, base_initial, candidate_peak, candidate_initial, difference in zip(
+                    base_peaks, base_cold, candidate_peaks, candidate_cold, differences, strict=True
+                )
+            )
+            gate.require(all(
+                base_peak >= base_initial and candidate_peak >= candidate_initial
+                for base_peak, base_initial, candidate_peak, candidate_initial in zip(
+                    base_peaks, base_cold, candidate_peaks, candidate_cold, strict=True
+                )
+            ), "cumulative peak RSS decreases after cold open")
+            if (cold["peak_allowed"] is True and bounded and increments_valid
+                    and gate._object(phase_result["time_regression"], "time regression")["detected_bad"] is False):
+                phase_result["peak_allowed"] = True
+                phase_result["category"] = "bounded-inherited-cold"
+                phase_result["max_increment_excess_bytes"] = max(differences)
     cumulative_noop = (
-        policy_version == memory.CUMULATIVE_RSS_POLICY_VERSION
+        policy_version in (memory.CUMULATIVE_RSS_POLICY_VERSION, memory.INCREMENTAL_RSS_POLICY_VERSION)
         and no_scroll
         and _full_y_rss_matches_re_display(baseline)
         and _full_y_rss_matches_re_display(candidate)

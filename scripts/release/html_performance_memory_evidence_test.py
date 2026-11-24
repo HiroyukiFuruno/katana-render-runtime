@@ -157,6 +157,59 @@ class MemoryEvidenceTest(unittest.TestCase):
         phase = gate._object(gate._object(result["phases"], "phases")["full_y"], "full-Y result")
         self.assertNotEqual(phase["category"], "inherited-re-display")
 
+    def test_incremental_policy_distinguishes_inherited_and_new_peak(self) -> None:
+        for path in self.paths:
+            report = gate.read_json(path)
+            candidate = path.name.startswith("candidate-")
+            for sample in gate._objects(report["samples"], "samples"):
+                phases = gate._object(sample["phases"], "phases")
+                for phase in gate.PHASES:
+                    entry = gate._object(phases[phase], "phase")
+                    measured = gate._object(entry["measurement"], "measurement") if phase in (
+                        "post_operation", "same_session_resize",
+                    ) else entry
+                    measured["peak_rss_bytes"] = 100 * policy.MIB
+                    if candidate:
+                        measured["peak_rss_bytes"] = gate._integer(measured["peak_rss_bytes"], "peak") + 2 * policy.MIB
+                        if phase == "cold_open":
+                            measured["elapsed_ms"] = 1
+                        elif phase == "warm_open":
+                            measured["peak_rss_bytes"] = gate._integer(measured["peak_rss_bytes"], "peak") + 2 * policy.MIB
+                    elif phase == "cold_open":
+                        measured["elapsed_ms"] = 10
+            path.write_text(json.dumps(report))
+        result = evidence.evaluate_paired(
+            self.paths, self.expected, self.retained,
+            policy_version=policy.INCREMENTAL_RSS_POLICY_VERSION,
+        )
+        phases = gate._object(result["phases"], "phases")
+        self.assertTrue(gate._object(phases["cold_open"], "cold")["peak_allowed"])
+        self.assertFalse(gate._object(phases["warm_open"], "warm")["peak_allowed"])
+        for path in (path for path in self.paths if path.name.startswith("candidate-")):
+            report = gate.read_json(path)
+            for sample in gate._objects(report["samples"], "samples"):
+                warm = gate._object(gate._object(sample["phases"], "phases")["warm_open"], "warm")
+                warm["peak_rss_bytes"] = 102 * policy.MIB
+            path.write_text(json.dumps(report))
+        result = evidence.evaluate_paired(
+            self.paths, self.expected, self.retained,
+            policy_version=policy.INCREMENTAL_RSS_POLICY_VERSION,
+        )
+        warm = gate._object(gate._object(result["phases"], "phases")["warm_open"], "warm")
+        self.assertTrue(warm["peak_allowed"])
+        self.assertEqual(warm["category"], "bounded-inherited-cold")
+        path = next(path for path in self.paths if path.name.startswith("candidate-"))
+        report = gate.read_json(path)
+        sample = gate._objects(report["samples"], "samples")[0]
+        warm = gate._object(gate._object(sample["phases"], "phases")["warm_open"], "warm")
+        warm["peak_rss_bytes"] = 101 * policy.MIB
+        path.write_text(json.dumps(report))
+        with self.assertRaisesRegex(ValueError, "cumulative peak RSS decreases"):
+            evidence.evaluate_paired(
+                self.paths, self.expected, self.retained,
+                policy_version=policy.INCREMENTAL_RSS_POLICY_VERSION,
+            )
+
     def set_actual_full_y_scroll(self) -> None:
         path = next(path for path in self.paths if path.name == "candidate-0.json")
         report = gate.read_json(path)
