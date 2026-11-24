@@ -295,11 +295,11 @@ jobs:
       github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
       inputs.verify_platform == 'linux-validation-contract'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 38
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ (inputs.verify_filter == 'exact-322486da' || inputs.verify_filter == 'exact-322486da-producer') && '322486daa47d622827c2eb738030bdc539cbb111' || github.sha }}
+          ref: ${{ (inputs.verify_filter == 'exact-322486da' || contains(fromJSON('["exact-322486da-producer","exact-322486da-runtime-assets"]'), inputs.verify_filter)) && '322486daa47d622827c2eb738030bdc539cbb111' || github.sha }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
@@ -314,19 +314,19 @@ jobs:
       - name: Install just for the shell recipe regression
         uses: taiki-e/install-action@4ccefd7d26b61bbb81f4ff01165e8a6880a1bd59 # just
       - name: Install Java runtime for exact CI task
-        if: inputs.verify_filter == 'exact-322486da-producer'
+        if: contains(fromJSON('["exact-322486da-producer","exact-322486da-runtime-assets"]'), inputs.verify_filter)
         uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v5.0.0
         with:
           distribution: temurin
           java-version: "21"
       - name: Restore Linux Rust build cache
-        if: inputs.verify_filter == 'exact-322486da-producer'
+        if: contains(fromJSON('["exact-322486da-producer","exact-322486da-runtime-assets"]'), inputs.verify_filter)
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: ci-v2-ubuntu-latest-stable-default
           save-if: false
       - name: Install Linux prerequisites for exact CI task
-        if: inputs.verify_filter == 'exact-322486da-producer'
+        if: contains(fromJSON('["exact-322486da-producer","exact-322486da-runtime-assets"]'), inputs.verify_filter)
         run: |
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk graphviz libfontconfig-dev libfreetype-dev
@@ -338,7 +338,7 @@ jobs:
       - name: Verify generated asset fingerprints and RTK recipes
         env:
           KRR_VALIDATION_MODE: ${{ inputs.verify_filter }}
-          KRR_VALIDATION_HEAD: ${{ (inputs.verify_filter == 'exact-322486da' || inputs.verify_filter == 'exact-322486da-producer') && '322486daa47d622827c2eb738030bdc539cbb111' || github.sha }}
+          KRR_VALIDATION_HEAD: ${{ (inputs.verify_filter == 'exact-322486da' || contains(fromJSON('["exact-322486da-producer","exact-322486da-runtime-assets"]'), inputs.verify_filter)) && '322486daa47d622827c2eb738030bdc539cbb111' || github.sha }}
           MOON_CONCURRENCY: "1"
         run: |
           test "$(git rev-parse HEAD)" = "$KRR_VALIDATION_HEAD"
@@ -346,9 +346,16 @@ jobs:
           uv venv --python 3.13 "$RUNNER_TEMP/krr-asset-python"
           uv pip sync --python "$RUNNER_TEMP/krr-asset-python/bin/python3" --require-hashes scripts/release/html-performance-requirements.lock
           export PATH="$RUNNER_TEMP/krr-asset-python/bin:$PATH"
-          if [[ "$KRR_VALIDATION_MODE" == "exact-322486da-producer" ]]; then
+          if [[ "$KRR_VALIDATION_MODE" == "exact-322486da-producer" || "$KRR_VALIDATION_MODE" == "exact-322486da-runtime-assets" ]]; then
             test_exit=0
+            if [[ "$KRR_VALIDATION_MODE" == "exact-322486da-runtime-assets" ]]; then
+              just plantuml-install
+              just runtime-bundle-package-check
+              just plantuml-runtime-package-check
+              just runtime-asset-script-test || test_exit=$?
+            else
             bun run moon exec krr:runtime-quality-owned-validation-contract-producer || test_exit=$?
+            fi
             if (( test_exit != 0 )); then
               python3 - <<'PY'
           import json, re
@@ -368,7 +375,7 @@ jobs:
                   summary = []
                   for raw_line in stream.read_text(errors="replace").splitlines():
                       line = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", raw_line)
-                      if re.match(r"^\s*(?:\((?:fail|timeout)\)|(?:[0-9]+ fail|[0-9]+ pass)\b|error: expect\(|at .*owned-validation-contract_test\.ts:)", line):
+                      if re.match(r"^\s*(?:\((?:fail|timeout)\)|(?:[0-9]+ fail|[0-9]+ pass)\b|at .*owned-validation-contract_test\.ts:)", line):
                           summary.append(line[:240])
                   for line in summary[-30:]:
                       print(line)
