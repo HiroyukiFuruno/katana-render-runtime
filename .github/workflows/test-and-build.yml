@@ -530,6 +530,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && (inputs.verify_platform == 'windows' || inputs.verify_platform == 'linux-fidelity') && '58834826609d3e86d3509c2dde0cfdffa9d8414f' || github.sha }}
+
+      - name: Verify the pinned manual release candidate
+        if: >-
+          github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
+          (inputs.verify_platform == 'windows' || inputs.verify_platform == 'linux-fidelity')
+        shell: bash
+        run: |
+          candidate="$(git rev-parse HEAD)"
+          test "$candidate" = '58834826609d3e86d3509c2dde0cfdffa9d8414f'
+          printf 'Candidate source %s\n' "$candidate"
 
       - name: Verify optional local macOS evidence
         id: mac_proof
