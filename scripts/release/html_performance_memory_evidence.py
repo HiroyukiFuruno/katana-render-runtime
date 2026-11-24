@@ -101,6 +101,7 @@ def evaluate_paired(
         cold = gate._object(phases["cold_open"], "cold open result")
         _, base_cold = _phase_values(baseline, "cold_open", no_scroll=False)
         _, candidate_cold = _phase_values(candidate, "cold_open", no_scroll=False)
+        base_previous, candidate_previous = base_cold, candidate_cold
         for phase in gate.PHASES:
             if phase == "cold_open":
                 continue
@@ -119,18 +120,18 @@ def evaluate_paired(
                 for key in ("median", "p95", "maximum")
             )
             increments_valid = all(
-                base_peak >= base_initial and candidate_peak >= candidate_initial
-                and difference <= min(memory.SMALL_PEAK_BYTES, base_peak * memory.SMALL_PEAK_RATIO)
-                for base_peak, base_initial, candidate_peak, candidate_initial, difference in zip(
-                    base_peaks, base_cold, candidate_peaks, candidate_cold, differences, strict=True
+                difference <= min(memory.SMALL_PEAK_BYTES, base_peak * memory.SMALL_PEAK_RATIO)
+                for base_peak, difference in zip(
+                    base_peaks, differences, strict=True
                 )
             )
             gate.require(all(
-                base_peak >= base_initial and candidate_peak >= candidate_initial
-                for base_peak, base_initial, candidate_peak, candidate_initial in zip(
-                    base_peaks, base_cold, candidate_peaks, candidate_cold, strict=True
+                base_peak >= base_prior and candidate_peak >= candidate_prior
+                for base_peak, base_prior, candidate_peak, candidate_prior in zip(
+                    base_peaks, base_previous, candidate_peaks, candidate_previous, strict=True
                 )
             ), "cumulative peak RSS decreases after cold open")
+            base_previous, candidate_previous = base_peaks, candidate_peaks
             if (cold["peak_allowed"] is True and bounded and increments_valid
                     and gate._object(phase_result["time_regression"], "time regression")["detected_bad"] is False):
                 phase_result["peak_allowed"] = True

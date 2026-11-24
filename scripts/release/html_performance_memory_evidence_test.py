@@ -173,7 +173,7 @@ class MemoryEvidenceTest(unittest.TestCase):
                         measured["peak_rss_bytes"] = gate._integer(measured["peak_rss_bytes"], "peak") + 2 * policy.MIB
                         if phase == "cold_open":
                             measured["elapsed_ms"] = 1
-                        elif phase == "warm_open":
+                        elif phase in ("warm_open", "re_display", "full_y", "post_operation", "same_session_resize"):
                             measured["peak_rss_bytes"] = gate._integer(measured["peak_rss_bytes"], "peak") + 2 * policy.MIB
                     elif phase == "cold_open":
                         measured["elapsed_ms"] = 10
@@ -188,8 +188,13 @@ class MemoryEvidenceTest(unittest.TestCase):
         for path in (path for path in self.paths if path.name.startswith("candidate-")):
             report = gate.read_json(path)
             for sample in gate._objects(report["samples"], "samples"):
-                warm = gate._object(gate._object(sample["phases"], "phases")["warm_open"], "warm")
-                warm["peak_rss_bytes"] = 102 * policy.MIB
+                phases = gate._object(sample["phases"], "phases")
+                for phase in ("warm_open", "re_display", "full_y", "post_operation", "same_session_resize"):
+                    entry = gate._object(phases[phase], "phase")
+                    measured = gate._object(entry["measurement"], "measurement") if phase in (
+                        "post_operation", "same_session_resize",
+                    ) else entry
+                    measured["peak_rss_bytes"] = 102 * policy.MIB
             path.write_text(json.dumps(report))
         result = evidence.evaluate_paired(
             self.paths, self.expected, self.retained,
