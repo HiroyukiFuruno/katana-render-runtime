@@ -325,7 +325,7 @@ jobs:
           export PATH="$RUNNER_TEMP/krr-asset-python/bin:$PATH"
           if [[ "$KRR_VALIDATION_MODE" == "exact-322486da-producer" ]]; then
             test_exit=0
-            just runtime-unused-script-verify-run runtime-quality-owned-validation-contract || test_exit=$?
+            bun run moon exec krr:runtime-quality-owned-validation-contract-producer || test_exit=$?
             if (( test_exit != 0 )); then
               python3 - <<'PY'
           import json, re
