@@ -436,6 +436,17 @@ class NativeObservationTests(unittest.TestCase):
                     fixture.admission()
                 self.assertFalse((fixture.attempt / "child.json").exists())
 
+    def test_explicit_rustup_toolchain_remains_bound_to_request_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Fixture(Path(directory))
+            fixture.environment["RUSTUP_TOOLCHAIN"] = "1.99.1"
+            fixture.save_environment_proof()
+            self.assertEqual(fixture.admission().environment["RUSTUP_TOOLCHAIN"], "1.99.1")
+            fixture.full_environment["RUSTUP_TOOLCHAIN"] = "stable"
+            with self.assertRaisesRegex(RuntimeError, "Cargo environment differs"):
+                fixture.admission()
+            self.assertFalse((fixture.attempt / "child.json").exists())
+
 
     def test_just_shell_overlay_values_remain_exactly_bound(self) -> None:
         for key, value in (("PWD", "/wrong"), ("SHLVL", "1"), ("_", "/arbitrary/python3"),

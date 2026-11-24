@@ -648,6 +648,11 @@ class JustEnvironmentTests(unittest.TestCase):
         self.assertEqual(environment["TEST_THREADS"], guard.JUST_DEFAULT_CONCURRENCY)
         self.assertNotIn("JOBS", environment)
 
+    def test_selected_rustup_toolchain_is_forwarded_to_managed_children(self) -> None:
+        with patch.dict(os.environ, {"RUSTUP_TOOLCHAIN": "1.99.1"}):
+            environment = bindings.base_environment([])
+        self.assertEqual(environment["RUSTUP_TOOLCHAIN"], "1.99.1")
+
     def test_changed_just_export_defaults_are_rejected(self) -> None:
         text = (Path(__file__).resolve().parents[2] / "Justfile").read_text()
         changes = (
