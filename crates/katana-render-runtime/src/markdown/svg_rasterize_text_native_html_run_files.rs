@@ -102,8 +102,7 @@ impl NativeFontFileCache {
         let path = &metadata.canonical_path;
         let length = stamp.file_length();
         if length > MAPPED_FONT_SESSION_BYTES {
-            let frame_large_face = frame_faces.iter().find(|face| face.is_large_mapping());
-            return map_large_source(path, stamp, length, frame_large_face);
+            return map_large_source(path, stamp, length, frame_faces);
         }
         let resident = self
             .0

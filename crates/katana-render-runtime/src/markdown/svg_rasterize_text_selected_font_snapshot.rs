@@ -16,15 +16,28 @@ const MAX_SELECTED_FILE_BYTES: u64 = 128 * 1024 * 1024;
 
 impl FileFace {
     pub(super) fn mapped_bytes(&self) -> u64 {
-        match self.database.face_source(self.id) {
-            Some((Source::SharedFile(_, data), _)) => data.as_ref().as_ref().len() as u64,
-            _ => 0,
-        }
+        self.mapped_source().map_or(0, |bytes| mapping_len(&bytes))
     }
 
     pub(super) fn is_large_mapping(&self) -> bool {
         self.mapped_bytes() > MAPPED_FONT_SESSION_BYTES
     }
+
+    fn mapped_source(&self) -> Option<MappedFontBytes> {
+        let (Source::SharedFile(_, bytes), _) = self.database.face_source(self.id)? else {
+            return None;
+        };
+        Some(bytes)
+    }
+
+    fn large_mapping(&self) -> Option<MappedFontBytes> {
+        let bytes = self.mapped_source()?;
+        (mapping_len(&bytes) > MAPPED_FONT_SESSION_BYTES).then_some(bytes)
+    }
+}
+
+fn mapping_len(bytes: &MappedFontBytes) -> u64 {
+    bytes.as_ref().as_ref().len() as u64
 }
 
 pub(super) fn map_source(
@@ -44,17 +57,14 @@ pub(super) fn map_large_source(
     path: &Path,
     stamp: &FileStamp,
     length: u64,
-    frame_large_face: Option<&FileFace>,
+    frame_faces: &[FileFace],
 ) -> Option<MappedFontBytes> {
-    if let Some(face) = frame_large_face {
+    let frame_mapping = frame_faces
+        .iter()
+        .find_map(|face| face.large_mapping().map(|bytes| (face, bytes)));
+    if let Some((face, bytes)) = frame_mapping {
         /* WHY: 同じTTC内の別の面は共有し、1フレームで保つ大容量ファイルは1件にする。 */
-        if face.path != path || &face.stamp != stamp {
-            return None;
-        }
-        let (Source::SharedFile(_, bytes), _) = face.database.face_source(face.id)? else {
-            return None;
-        };
-        return Some(bytes);
+        return (face.path == path && &face.stamp == stamp).then_some(bytes);
     }
     map(path, stamp, length)
 }
@@ -81,13 +91,24 @@ fn map(path: &Path, stamp: &FileStamp, length: u64) -> Option<MappedFontBytes> {
     let directory = tempfile::tempdir().ok()?;
     let snapshot = directory.path().join("selected-font");
     create_bounded_snapshot(&mut origin, &snapshot, length).ok()?;
-    if stamp_open_font_file(path, &origin).as_ref() != Ok(stamp)
+    map_verified_snapshot(path, stamp, length, &origin, &snapshot, directory)
+}
+
+fn map_verified_snapshot(
+    path: &Path,
+    stamp: &FileStamp,
+    length: u64,
+    origin: &File,
+    snapshot: &Path,
+    directory: tempfile::TempDir,
+) -> Option<MappedFontBytes> {
+    if stamp_open_font_file(path, origin).as_ref() != Ok(stamp)
         || stamp_path_uncached(path).as_ref() != Ok(stamp)
     {
         return None;
     }
     /* WHY: 所有する一時ファイルだけをmapし、元ファイルの更新でmappingが壊れる経路を閉じる。 */
-    let bytes = map_immutable_font_data(&snapshot, length).ok()?;
+    let bytes = map_immutable_font_data(snapshot, length).ok()?;
     Some(Arc::new(PrivateMapping {
         bytes,
         _directory: directory,
@@ -107,6 +128,10 @@ fn create_bounded_snapshot(origin: &mut File, target: &Path, length: u64) -> std
     if reflink_copy::reflink_file_to_path(origin, target).is_ok() {
         return Ok(());
     }
+    copy_bounded(origin, target, length)
+}
+
+fn copy_bounded(origin: &mut File, target: &Path, length: u64) -> std::io::Result<()> {
     let mut destination = File::create_new(target)?;
     let copied = copy(&mut origin.take(length + 1), &mut destination)?;
     if copied != length {
@@ -114,6 +139,10 @@ fn create_bounded_snapshot(origin: &mut File, target: &Path, length: u64) -> std
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "svg_rasterize_text_selected_font_snapshot_boundary_tests.rs"]
+mod boundary_tests;
 
 #[cfg(test)]
 mod tests {
