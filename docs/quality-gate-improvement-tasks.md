@@ -1,6 +1,9 @@
 # 品質ゲート改善の作業台帳
 
-## macOSのシステム書体検索（2026-11-24）
+## 3 OSのシステム書体検索（2026-11-24）
+
+- [/] 書体探索は既存の `PlatformFontStrategy` を境界とし、macOSのCoreText、WindowsのFontique経由のDirectWrite、LinuxのFontconfigを確認した。現行のFontiqueとfontdbを最初の評価対象とする。代替候補の [Martensite Font Fallback](https://docs.rs/martensite-font-fallback/latest/martensite_font_fallback/) は3 OSのネイティブ照会を提供し、[font-kit](https://docs.rs/font-kit/latest/font_kit/) はシステム書体の探索とCSS書体マッチングを提供する。Chromeと同じ書体面と画像を出すこと、表示時間とメモリを維持することはKRRへの組み込み測定で判断する。
+- [ ] 同じ候補と入力で、優先書体を使える文字と代替が必要な文字、日本語・簡体字・繁体字・韓国語、通常と太字を3 OSそれぞれのChromeと照合する。実際の書体面・画像・表示時間・解放後メモリを確認する。3 OS共通の同梱書体データ共有もこの確認に含める。過去の手動Windows/Linux実行は下記の候補と入力の範囲で記録し、現行候補の確認は別途行う。
 
 - [x] イベント付きフォームの初回表示では、公開版で呼ばれなかったCoreTextのファミリー列挙と代替書体照会が、公開候補でそれぞれ呼ばれていた。呼び出し箇所と増えた常駐量を同一入力・同一端末で調べた（`tmp/quality/resumed-owner-r3509/release-v0424-57ece5de-event-coretext-causal-stack-hh_0e6a3/safe-summary.json`）。
 - [x] ファイルからシステム書体を探す処理は、既存の`fontdb`が作る一覧を同一HTMLフレーム内で共有する。入れ子や中断時に外側の一覧へ戻る2回帰を含め、関連27件・書式・AST検査に合格した（`tmp/quality/resumed-owner-r3509/release-v0424-font-inventory-focused-d0ntfdtu/`）。Firefoxでも[macOSの書体一覧を重複取得した起動回帰](https://bugzilla.mozilla.org/show_bug.cgi?id=1399503)が報告されている。
@@ -20,7 +23,9 @@
 - [x] 初回ラスタライズ直前の割り当て調査で、同梱のNoto Sansを2回コピーしていることを確認した（計557,104バイト）。HTMLとSVGの書体DBが実行ファイル内の同じ読み取り専用データを参照するよう共通化した。関連96テスト、書式・AST・性能ハーネスの固定依存を確認した（`tmp/quality/resumed-owner-r3509/release-v0424-first-raster-allocation-stacks-kj3a9gst/`、`tmp/quality/resumed-owner-r3509/release-v0424-selected-font-snapshot-bundled-font-zero-copy-k6p74_bw/`）。
 - [/] フォーム25組の限定計測で先頭PNGの一致を確認した。初回表示の中央値は公開版67.69 ms、直前候補29.15 ms、共有後30.87 ms。ピークRSSは公開版31.09 MiB、直前候補39.23 MiB、共有後38.44 MiBで、公開版との差が8.14から7.34 MiBに下がった。6段階すべてピークRSS差が8 MiB未満。正式性能84条件と現行候補の描画検証は残る（`tmp/quality/resumed-owner-r3509/release-v0424-embedded-font-zero-copy-paired-cjxkx4in/safe-summary.json`）。
 - [ ] 同じ25組を既存v6判定で確認した。初回表示、操作後、リサイズのピークメモリ判定は許容。再オープンは+7.312 MiB・0.035 ms短縮、再表示は+7.297 MiB・0.009 ms短縮で、速度改善の条件を満たさなかった。無操作の縦スクロールは再表示と同じピークを引き継ぐ。正式計測に進む前に再オープンと再表示を改善する（`tmp/quality/resumed-owner-r3509/release-v0424-embedded-font-zero-copy-paired-cjxkx4in/peak-policy-scoped.json`）。
+- [x] 同じmacOSフォームを両版で各9回トレースした。候補の再オープンではスクリプト実行が中央値2.458 ms、フレーム生成が1.479 ms。再表示はフレーム全体1.021 msのうち、レイアウト0.479 ms、ラスタライズ0.494 msだった。既存のDOMリビジョンはstyle/class属性変更を追跡せず、レイアウト時にはobserverも動くため、その値だけで前の画像を返す案は採用しない（`tmp/quality/resumed-owner-r3509/release-v0424-warm-refresh-stage-trace-QutEunAv/safe-summary.json`）。
 - [x] Mermaidの管理ビルドが、RTKのシェルが子に渡す`OLDPWD`を未許可入力として拒否した。JustのCLIビルド入口でこの項目だけを除き、既知入力の一覧と未知項目の拒否を維持した。producerと容量ガードの回帰、および実レシピの展開を確認した。現行候補で117図の正式比較を再実行する（`tmp/quality/resumed-owner-r3509/release-v0424-ca61399d-mermaid-current-b4ravz_3/`、`tmp/quality/resumed-owner-r3509/release-v0424-native-cli-shell-metadata-test-8wdc14la/`）。
+- [ ] `f4f047c0` ではCLIのビルドと、英日両方のHTML描画probeのビルド証明検証まで通過した。CLIの環境組立で `RUSTUP_TOOLCHAIN` が落ち、CLIは既定のCargo 1.97.1、probeは指定した1.99.1でビルドされた。probeのバイナリSHA・成果物SHAは一致し、Cargoだけの不一致で採点前に拒否された。明示されたツールチェーンをCLIにも引き継ぎ、両ビルドで同一のCargo実体を照合して正式比較を再実行する（`tmp/quality/resumed-owner-r3509/release-v0424-f4f047c0-mermaid-current-gf2jx2ma/comparison/receipt.json`）。
 
 ## スクロールが発生しない条件の性能判定（2026-11-24）
 
