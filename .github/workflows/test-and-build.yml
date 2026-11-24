@@ -359,7 +359,7 @@ jobs:
         env:
           KRR_VALIDATION_MODE: ${{ inputs.verify_filter }}
           KRR_VALIDATION_HEAD: ${{ (inputs.verify_filter == 'exact-57ece5de' || contains(fromJSON('["exact-57ece5de-producer","exact-57ece5de-runtime-assets"]'), inputs.verify_filter)) && '57ece5de4389752931a095089922b393ab84cf4b' || github.sha }}
-          MOON_CONCURRENCY: "1"
+          MOON_CONCURRENCY: "${{ inputs.verify_filter == 'exact-57ece5de-runtime-assets' && '2' || '1' }}"
         run: |
           test "$(git rev-parse HEAD)" = "$KRR_VALIDATION_HEAD"
           bun install --frozen-lockfile
