@@ -8,6 +8,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
+const SYSTEM_POINT_SIZE: f64 = 12.0;
+const REGULAR_NAME: &str = ".SFNS-Regular";
+const ITALIC_NAME: &str = ".SFNS-RegularItalic";
+const REGULAR_PATH: &str = "/System/Library/Fonts/SFNS.ttf";
+const ITALIC_PATH: &str = "/System/Library/Fonts/SFNSItalic.ttf";
+
 pub(super) fn resolve_paths<'a>(
     families: &BTreeSet<&'a str>,
     scan: impl FnOnce(&BTreeSet<&'a str>) -> BTreeSet<PathBuf>,
@@ -28,24 +34,17 @@ pub(super) fn resolve_paths<'a>(
 }
 
 fn family_paths(family: &str) -> BTreeSet<PathBuf> {
-    if family == "system font" {
-        /* WHY: 既知の標準書体では2ファイルを直接取得し、全バリエーションの列挙を省く。 */
-        system_ui_paths().unwrap_or_else(|| registered_family_paths(family))
-    } else {
-        registered_family_paths(family)
+    /* WHY: 既知の標準書体では2ファイルを直接取得し、全バリエーションの列挙を省く。 */
+    if family == "system font"
+        && let Some(paths) = system_ui_paths()
+    {
+        return paths;
     }
+    registered_family_paths(family)
 }
 
 fn system_ui_paths() -> Option<BTreeSet<PathBuf>> {
-    const SYSTEM_POINT_SIZE: f64 = 12.0;
-    const REGULAR_NAME: &str = ".SFNS-Regular";
-    const ITALIC_NAME: &str = ".SFNS-RegularItalic";
-    const REGULAR_PATH: &str = "/System/Library/Fonts/SFNS.ttf";
-    const ITALIC_PATH: &str = "/System/Library/Fonts/SFNSItalic.ttf";
-    /* SAFETY: CoreTextへ公開UI種別、正のサイズ、language未指定を渡す。 */
-    let regular = unsafe {
-        CTFont::new_ui_font_for_language(CTFontUIFontType::System, SYSTEM_POINT_SIZE, None)
-    }?;
+    let regular = system_ui_font()?;
     /* SAFETY: null transformはCoreTextが文書化するidentity transform。 */
     let italic = unsafe {
         regular.copy_with_symbolic_traits(
@@ -61,6 +60,11 @@ fn system_ui_paths() -> Option<BTreeSet<PathBuf>> {
     ]
     .into_iter()
     .collect()
+}
+
+fn system_ui_font() -> Option<CFRetained<CTFont>> {
+    /* SAFETY: CoreTextへ公開UI種別、正のサイズ、language未指定を渡す。 */
+    unsafe { CTFont::new_ui_font_for_language(CTFontUIFontType::System, SYSTEM_POINT_SIZE, None) }
 }
 
 fn system_ui_font_path(
@@ -136,7 +140,8 @@ fn descriptor_path(descriptor: &CTFontDescriptor) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BTreeSet, PathBuf, family_paths, registered_family_paths, resolve_paths, system_ui_paths,
+        BTreeSet, Path, PathBuf, REGULAR_NAME, REGULAR_PATH, family_paths, registered_family_paths,
+        resolve_paths, system_ui_font, system_ui_font_path, system_ui_paths,
     };
 
     #[test]
@@ -158,6 +163,16 @@ mod tests {
         assert!(!registered.is_empty());
         assert_eq!(fast, registered);
         assert_eq!(family_paths("system font"), fast);
+        Ok(())
+    }
+
+    #[test]
+    fn system_font_rejects_mismatched_face_style_and_file() -> Result<(), &'static str> {
+        let font = system_ui_font().ok_or("CoreText system font missing")?;
+        let path = Path::new(REGULAR_PATH);
+        assert!(system_ui_font_path(&font, "Other Face", path, false).is_none());
+        assert!(system_ui_font_path(&font, REGULAR_NAME, path, true).is_none());
+        assert!(system_ui_font_path(&font, REGULAR_NAME, Path::new("other.ttf"), false).is_none());
         Ok(())
     }
 }
