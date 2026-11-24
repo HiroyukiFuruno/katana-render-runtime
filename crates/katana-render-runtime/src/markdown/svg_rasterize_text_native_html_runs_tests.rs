@@ -1,8 +1,13 @@
 use super::test_support::{
     FONT_SIZE, INTERMEDIATE_WEIGHT, duplicate_width_face, regular_shape, roboto_flex, variable_face,
 };
-use super::{Arc, Database, ID, Memo, Run, RunFace, RunPlan, SelectionKey, SelectionQuery};
+use super::{
+    Arc, Database, ID, Memo, Run, RunFace, RunPlan, SelectionKey, SelectionQuery,
+    reuse_existing_source,
+};
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
+use crate::markdown::svg_rasterize::font_file_fixture;
+use resvg::usvg::fontdb::Source;
 use std::error::Error;
 
 #[test]
@@ -26,6 +31,45 @@ fn unsupported_native_fallback_keeps_the_existing_cjk_run_and_memoizes_the_miss(
             matches!(query.select(&mut memo, '装', old_id, &[]), RunFace::Existing(id) if id == old_id)
         );
     }
+}
+
+#[test]
+fn shared_selected_face_uses_its_alias_even_when_the_physical_face_matches()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let fixture = fixture(&directory)?;
+    let old = fixture
+        .database
+        .face(fixture.face_id)
+        .ok_or("original face missing")?;
+    assert!(reuse_existing_source(Some(old), Some(old), &[]));
+    let (shared, shared_id) = shared_database(&fixture)?;
+    let new = shared.face(shared_id).ok_or("shared face info missing")?;
+    assert!(!reuse_existing_source(Some(old), Some(new), &[]));
+    assert!(reuse_existing_source(Some(new), Some(new), &[]));
+    Ok(())
+}
+
+fn fixture(
+    directory: &tempfile::TempDir,
+) -> Result<font_file_fixture::FontFileFixture, Box<dyn Error>> {
+    font_file_fixture::create(
+        directory.path().join("font.ttf"),
+        font_file_fixture::FONT_BYTES,
+    )
+    .map_err(Into::into)
+}
+
+fn shared_database(
+    fixture: &font_file_fixture::FontFileFixture,
+) -> Result<(Arc<Database>, ID), Box<dyn Error>> {
+    let mut database = Database::new();
+    let ids = database.load_font_source(Source::SharedFile(
+        fixture.path.clone(),
+        Arc::new(font_file_fixture::FONT_BYTES.to_vec()),
+    ));
+    let id = *ids.first().ok_or("shared face missing")?;
+    Ok((Arc::new(database), id))
 }
 
 #[test]

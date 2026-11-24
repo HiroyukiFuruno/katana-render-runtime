@@ -135,9 +135,7 @@ impl<'a> SelectionQuery<'a> {
         };
         let old = self.database.face(old_id);
         let new = selected.database.face(selected.id);
-        if selected.variations.is_empty()
-            && matches!((old, new), (Some(a), Some(b)) if a.index == b.index && source_path(a) == source_path(b))
-        {
+        if reuse_existing_source(old, new, &selected.variations) {
             return RunFace::Existing(old_id);
         }
         RunFace::Native(selected)
@@ -153,6 +151,23 @@ impl<'a> SelectionQuery<'a> {
             }
         }
     }
+}
+
+fn reuse_existing_source(
+    old: Option<&FaceInfo>,
+    new: Option<&FaceInfo>,
+    variations: &[resvg::usvg::FontVariation],
+) -> bool {
+    matches!((old, new), (Some(a), Some(b))
+        if variations.is_empty()
+            && a.index == b.index
+            && source_path(a) == source_path(b)
+            /* WHY: 既存faceが共有済み、またはselected faceが未共有ならalias化してもmmapを減らせない。 */
+            && (is_shared_source(a) || !is_shared_source(b)))
+}
+
+fn is_shared_source(face: &FaceInfo) -> bool {
+    matches!(face.source, resvg::usvg::fontdb::Source::SharedFile(_, _))
 }
 
 fn same_run_face(left: &RunFace, right: &RunFace) -> bool {

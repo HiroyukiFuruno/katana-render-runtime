@@ -1,6 +1,12 @@
 use objc2_core_foundation::{CFArray, CFDictionary, CFRetained, CFSet, CFString, CFURL};
-use objc2_core_text::{CTFontDescriptor, kCTFontFamilyNameAttribute, kCTFontURLAttribute};
-use std::{collections::BTreeSet, path::PathBuf};
+use objc2_core_text::{
+    CTFont, CTFontDescriptor, CTFontSymbolicTraits, CTFontUIFontType, kCTFontFamilyNameAttribute,
+    kCTFontNameAttribute, kCTFontURLAttribute,
+};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+};
 
 pub(super) fn resolve_paths<'a>(
     families: &BTreeSet<&'a str>,
@@ -9,7 +15,7 @@ pub(super) fn resolve_paths<'a>(
     let mut paths = BTreeSet::new();
     let mut unresolved = BTreeSet::new();
     for &family in families {
-        let direct = registered_family_paths(family);
+        let direct = family_paths(family);
         if direct.is_empty() {
             unresolved.insert(family);
         }
@@ -19,6 +25,68 @@ pub(super) fn resolve_paths<'a>(
         paths.extend(scan(&unresolved));
     }
     paths
+}
+
+fn family_paths(family: &str) -> BTreeSet<PathBuf> {
+    if family == "system font" {
+        /* WHY: 既知の標準書体では2ファイルを直接取得し、全バリエーションの列挙を省く。 */
+        system_ui_paths().unwrap_or_else(|| registered_family_paths(family))
+    } else {
+        registered_family_paths(family)
+    }
+}
+
+fn system_ui_paths() -> Option<BTreeSet<PathBuf>> {
+    const SYSTEM_POINT_SIZE: f64 = 12.0;
+    const REGULAR_NAME: &str = ".SFNS-Regular";
+    const ITALIC_NAME: &str = ".SFNS-RegularItalic";
+    const REGULAR_PATH: &str = "/System/Library/Fonts/SFNS.ttf";
+    const ITALIC_PATH: &str = "/System/Library/Fonts/SFNSItalic.ttf";
+    /* SAFETY: CoreTextへ公開UI種別、正のサイズ、language未指定を渡す。 */
+    let regular = unsafe {
+        CTFont::new_ui_font_for_language(CTFontUIFontType::System, SYSTEM_POINT_SIZE, None)
+    }?;
+    /* SAFETY: null transformはCoreTextが文書化するidentity transform。 */
+    let italic = unsafe {
+        regular.copy_with_symbolic_traits(
+            SYSTEM_POINT_SIZE,
+            std::ptr::null(),
+            CTFontSymbolicTraits::ItalicTrait,
+            CTFontSymbolicTraits::ItalicTrait,
+        )
+    }?;
+    [
+        system_ui_font_path(&regular, REGULAR_NAME, Path::new(REGULAR_PATH), false),
+        system_ui_font_path(&italic, ITALIC_NAME, Path::new(ITALIC_PATH), true),
+    ]
+    .into_iter()
+    .collect()
+}
+
+fn system_ui_font_path(
+    font: &CTFont,
+    expected_name: &str,
+    expected_path: &Path,
+    italic: bool,
+) -> Option<PathBuf> {
+    /* SAFETY: CoreText fontから公開descriptorを取得する。 */
+    let descriptor = unsafe { font.font_descriptor() };
+    /* SAFETY: name属性をCFStringへ型検査し、system UI生成名だけを受理する。 */
+    let postscript_name = unsafe { descriptor.attribute(kCTFontNameAttribute) }?
+        .downcast::<CFString>()
+        .ok()?
+        .to_string();
+    if postscript_name != expected_name {
+        return None;
+    }
+    let path = descriptor_path(&descriptor)?;
+    /* SAFETY: CoreTextが作成したfontから公開のスタイル属性を取得する。 */
+    let traits = unsafe { font.symbolic_traits() };
+    if traits.contains(CTFontSymbolicTraits::ItalicTrait) != italic {
+        return None;
+    }
+    let canonical = path.canonicalize().ok()?;
+    (path == expected_path && canonical == expected_path && path.is_file()).then_some(path)
 }
 
 fn registered_family_paths(family: &str) -> BTreeSet<PathBuf> {
@@ -67,7 +135,9 @@ fn descriptor_path(descriptor: &CTFontDescriptor) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{BTreeSet, PathBuf, resolve_paths};
+    use super::{
+        BTreeSet, PathBuf, family_paths, registered_family_paths, resolve_paths, system_ui_paths,
+    };
 
     #[test]
     fn coretext_resolves_registered_families_and_scans_only_unresolved_families() {
@@ -79,5 +149,15 @@ mod tests {
 
         assert!(paths.contains(&PathBuf::from("/System/Library/Fonts/Times.ttc")));
         assert!(paths.contains(&PathBuf::from("/tmp/krr-legacy-fallback.ttf")));
+    }
+
+    #[test]
+    fn system_font_fast_path_matches_registered_family_paths() -> Result<(), &'static str> {
+        let registered = registered_family_paths("system font");
+        let fast = system_ui_paths().ok_or("SFNS normal and italic files missing")?;
+        assert!(!registered.is_empty());
+        assert_eq!(fast, registered);
+        assert_eq!(family_paths("system font"), fast);
+        Ok(())
     }
 }
