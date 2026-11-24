@@ -37,7 +37,10 @@ fn unsupported_native_fallback_keeps_the_existing_cjk_run_and_memoizes_the_miss(
 fn shared_selected_face_uses_its_alias_even_when_the_physical_face_matches()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
-    let fixture = fixture(&directory)?;
+    let fixture = font_file_fixture::create(
+        directory.path().join("font.ttf"),
+        font_file_fixture::FONT_BYTES,
+    )?;
     let old = fixture
         .database
         .face(fixture.face_id)
@@ -50,19 +53,9 @@ fn shared_selected_face_uses_its_alias_even_when_the_physical_face_matches()
     Ok(())
 }
 
-fn fixture(
-    directory: &tempfile::TempDir,
-) -> Result<font_file_fixture::FontFileFixture, Box<dyn Error>> {
-    font_file_fixture::create(
-        directory.path().join("font.ttf"),
-        font_file_fixture::FONT_BYTES,
-    )
-    .map_err(Into::into)
-}
-
 fn shared_database(
     fixture: &font_file_fixture::FontFileFixture,
-) -> Result<(Arc<Database>, ID), Box<dyn Error>> {
+) -> Result<(Arc<Database>, ID), &'static str> {
     let mut database = Database::new();
     let ids = database.load_font_source(Source::SharedFile(
         fixture.path.clone(),
