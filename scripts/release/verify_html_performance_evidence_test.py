@@ -5185,7 +5185,7 @@ class PerformanceJsonBoundaryTest(unittest.TestCase):
             (root / "acquisition.json").write_text("{}")
             for flag, version, preceding in (
                 ("--require-memory-policy-v5", "html-memory-v5", "html-memory-v4"),
-                ("--require-current-memory-policy", "html-memory-v6", "html-memory-v5"),
+                ("--require-current-memory-policy", "html-memory-v7", "html-memory-v6"),
             ):
                 argv = ["verify_html_performance_evidence.py", "--repo", str(root),
                         "--evidence-dir", str(root), flag]
