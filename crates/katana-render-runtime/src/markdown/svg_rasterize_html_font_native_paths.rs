@@ -4,6 +4,11 @@ use std::{collections::BTreeSet, path::PathBuf};
 #[cfg(target_os = "macos")]
 #[path = "svg_rasterize_html_font_coretext_paths.rs"]
 mod coretext;
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_font_native_inventory.rs"]
+mod inventory;
+#[cfg(target_os = "macos")]
+pub(super) use inventory::FontInventoryScope;
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(super) fn native_system_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
@@ -17,10 +22,19 @@ pub(super) fn native_system_font_paths(families: &BTreeSet<&str>) -> BTreeSet<Pa
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 fn scan_system_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
+    #[cfg(target_os = "macos")]
+    if let Some(database) = inventory::frame_font_inventory(load_system_font_inventory) {
+        return named_font_paths(&database, families);
+    }
+    named_font_paths(&load_system_font_inventory(), families)
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn load_system_font_inventory() -> Database {
     /* WHY: 一時DBはinstalled face metadataだけを走査し、選択したFile sourceだけを呼出元DBへ残す。 */
     let mut database = Database::new();
     database.load_system_fonts();
-    named_font_paths(&database, families)
+    database
 }
 
 pub(super) fn named_font_paths(

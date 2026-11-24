@@ -22,6 +22,10 @@ pub(in crate::markdown::svg_rasterize) trait PlatformFontStrategy {
         operation()
     }
 
+    fn with_html_font_frame<T>(&self, operation: impl FnOnce() -> T) -> T {
+        self.with_temporary_font_objects(operation)
+    }
+
     fn installed_system_ui_family(&self) -> Option<&'static str> {
         None
     }
@@ -129,6 +133,12 @@ impl PlatformFontStrategy for NativeFonts {
     fn with_temporary_font_objects<T>(&self, operation: impl FnOnce() -> T) -> T {
         /* WHY: CLIや描画workerでもCoreTextの一時Objective-Cオブジェクトをフレーム終了時に解放する。 */
         objc2::rc::autoreleasepool(|_| operation())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn with_html_font_frame<T>(&self, operation: impl FnOnce() -> T) -> T {
+        let _inventory = super::native_paths::FontInventoryScope::enter();
+        self.with_temporary_font_objects(operation)
     }
 
     #[cfg(any(target_os = "macos", target_os = "ios"))]

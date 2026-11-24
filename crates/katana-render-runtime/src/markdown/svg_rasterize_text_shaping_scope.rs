@@ -22,7 +22,7 @@ impl HtmlFontFrameCache {
     pub(crate) fn with_frame<T>(&self, operation: impl FnOnce() -> T) -> T {
         use super::super::font::platform::{PlatformFontStrategy, font_platform};
 
-        font_platform().with_temporary_font_objects(|| {
+        font_platform().with_html_font_frame(|| {
             /* WHY: layoutとrasterで共有する書体の選択結果はframeごとに再評価する。 */
             let _font_scope = harfrust::face_cache::FontFaceCacheScope::enter();
             #[cfg(target_os = "macos")]

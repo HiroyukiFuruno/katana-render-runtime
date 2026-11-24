@@ -1,5 +1,12 @@
 # 品質ゲート改善の作業台帳
 
+## macOSのシステム書体検索（2026-11-24）
+
+- [x] イベント付きフォームの初回表示では、公開版で呼ばれなかったCoreTextのファミリー列挙と代替書体照会が、公開候補でそれぞれ呼ばれていた。呼び出し箇所と増えた常駐量を同一入力・同一端末で調べた（`tmp/quality/resumed-owner-r3509/release-v0424-57ece5de-event-coretext-causal-stack-hh_0e6a3/safe-summary.json`）。
+- [x] ファイルからシステム書体を探す処理は、既存の`fontdb`が作る一覧を同一HTMLフレーム内で共有する。入れ子や中断時に外側の一覧へ戻る2回帰を含め、関連27件・書式・AST検査に合格した（`tmp/quality/resumed-owner-r3509/release-v0424-font-inventory-focused-d0ntfdtu/`）。Firefoxでも[macOSの書体一覧を重複取得した起動回帰](https://bugzilla.mozilla.org/show_bug.cgi?id=1399503)が報告されている。
+- [x] 同一端末の各12回診断で、ファミリー列挙だけを`fontdb`へ置き換えると、フォーム3条件の初回表示は約29msから約55〜57msに増え、初回ピークRSSの改善は0.1MiB未満だった。Appleの公開オプションによる書体作成の差も常駐量約7.7MiBのままだった。両案を既定の経路に採用する根拠は得られなかった（`tmp/quality/resumed-owner-r3509/release-v0424-frame-font-inventory-native-retained-j3l80epu/safe-summary.json`、`tmp/quality/resumed-owner-r3509/release-v0424-apple-documented-font-options-h6g_9s7f/safe-summary.json`）。
+- [ ] CoreTextの2経路を外した診断では84条件の描画・操作後の状態・物理書体が一致した。言語設定や登録書体の違いで変わるCoreTextの代替書体選択は製品で維持する。候補の正式性能判定は継続する。
+
 ## スクロールが発生しない条件の性能判定（2026-11-24）
 
 - [x] `aa11dec7` の `dynamic-dom/expected-state/1280x900@1` を両版で各25回測定した。全試行でスクロールは0回で、累積ピークRSSは再表示直後と同じだった。再表示は約2.64 ms高速化して既存のメモリ判定を通過し、解放後の差は0バイトだった。v5では同じRSSを縦スクロールで再評価するため不合格になった。
