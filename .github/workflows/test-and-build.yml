@@ -299,7 +299,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.verify_filter == 'exact-322486da' && '322486daa47d622827c2eb738030bdc539cbb111' || github.sha }}
+          ref: ${{ (inputs.verify_filter == 'exact-322486da' || inputs.verify_filter == 'exact-322486da-producer') && '322486daa47d622827c2eb738030bdc539cbb111' || github.sha }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
@@ -315,7 +315,7 @@ jobs:
       - name: Verify generated asset fingerprints and RTK recipes
         env:
           KRR_VALIDATION_MODE: ${{ inputs.verify_filter }}
-          KRR_VALIDATION_HEAD: ${{ inputs.verify_filter == 'exact-322486da' && '322486daa47d622827c2eb738030bdc539cbb111' || github.sha }}
+          KRR_VALIDATION_HEAD: ${{ (inputs.verify_filter == 'exact-322486da' || inputs.verify_filter == 'exact-322486da-producer') && '322486daa47d622827c2eb738030bdc539cbb111' || github.sha }}
           MOON_CONCURRENCY: "1"
         run: |
           test "$(git rev-parse HEAD)" = "$KRR_VALIDATION_HEAD"
@@ -323,7 +323,36 @@ jobs:
           uv venv --python 3.13 "$RUNNER_TEMP/krr-asset-python"
           uv pip sync --python "$RUNNER_TEMP/krr-asset-python/bin/python3" --require-hashes scripts/release/html-performance-requirements.lock
           export PATH="$RUNNER_TEMP/krr-asset-python/bin:$PATH"
-          if [[ "$KRR_VALIDATION_MODE" == "exact-322486da" ]]; then
+          if [[ "$KRR_VALIDATION_MODE" == "exact-322486da-producer" ]]; then
+            test_exit=0
+            just runtime-unused-script-verify-run runtime-quality-owned-validation-contract || test_exit=$?
+            if (( test_exit != 0 )); then
+              python3 - <<'PY'
+          import json, re
+          from pathlib import Path
+          raw = Path("tmp/quality/runtime-script-results/raw")
+          for directory in sorted(raw.glob("*")):
+              command = directory / "group-001-command.json"
+              if not command.is_file():
+                  continue
+              argv = json.loads(command.read_bytes()).get("argv", [])
+              if "./scripts/quality/owned-validation-contract_test.ts" not in argv:
+                  continue
+              for name in ("group-001-stderr.log", "group-001-stdout.log"):
+                  stream = directory / name
+                  if not stream.is_file():
+                      continue
+                  summary = []
+                  for raw_line in stream.read_text(errors="replace").splitlines():
+                      line = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", raw_line)
+                      if re.match(r"^\s*(?:\((?:fail|timeout)\)|(?:[0-9]+ fail|[0-9]+ pass)\b|error: expect\(|at .*owned-validation-contract_test\.ts:)", line):
+                          summary.append(line[:240])
+                  for line in summary[-30:]:
+                      print(line)
+          PY
+            fi
+            exit "$test_exit"
+          elif [[ "$KRR_VALIDATION_MODE" == "exact-322486da" ]]; then
             bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-validation-contract_test.ts
           else
             bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-validation-contract_test.ts -t 'generated Rust fingerprint binds added paths and restores after removal|Just RTK proxy prefixes render correctly'
