@@ -367,7 +367,7 @@ jobs:
       - name: Run runtime asset script tests
         if: matrix.os == 'ubuntu-latest'
         env:
-          MOON_CONCURRENCY: "1"
+          MOON_CONCURRENCY: "2"
         # Linuxでの実測に合わせて準備と検査全体の時間を確保し、個別の期限は既存テストで判定する。
         timeout-minutes: 35
         run: |
