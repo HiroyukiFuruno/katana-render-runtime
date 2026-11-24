@@ -1,31 +1,18 @@
 use resvg::usvg::fontdb::{Database, ID, Source};
 
+#[path = "svg_rasterize_text_file_stamp.rs"]
+mod stamp;
+pub(in crate::markdown::svg_rasterize) use stamp::FileStamp;
+#[cfg(windows)]
+pub(super) use stamp::non_durable_file_stamp;
+use stamp::stamp_for_metadata;
+#[cfg(target_os = "macos")]
+pub(in crate::markdown::svg_rasterize) use stamp::stamp_open_font_file;
+
 pub(in super::super) fn observe_file_face_generation(database: &Database, id: ID) -> bool {
     /* WHY: 未選択の候補ファイルの変更も描画の選択結果へ影響する。 */
     let (is_file, stamp, _) = file_source_stamp(database, id);
     !is_file || stamp.is_some()
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(in crate::markdown::svg_rasterize) struct FileStamp {
-    len: u64,
-    modified: Option<std::time::SystemTime>,
-    created: Option<std::time::SystemTime>,
-    #[cfg(unix)]
-    device: u64,
-    #[cfg(unix)]
-    inode: u64,
-    #[cfg(unix)]
-    changed_seconds: i64,
-    #[cfg(unix)]
-    changed_nanoseconds: i64,
-    pub(super) durable_reusable: bool,
-}
-
-impl FileStamp {
-    pub(in crate::markdown::svg_rasterize) fn durable_reusable(&self) -> bool {
-        self.durable_reusable
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -54,7 +41,7 @@ impl FontSourceGeneration {
     pub(in super::super) fn durable_reusable(&self) -> bool {
         match &self.0 {
             Generation::Immutable => true,
-            Generation::File(stamp) => stamp.durable_reusable,
+            Generation::File(stamp) => stamp.durable_reusable(),
             Generation::Unavailable => false,
         }
     }
@@ -98,16 +85,6 @@ pub(in super::super) fn font_source_generation(
     id: ID,
 ) -> FontSourceGeneration {
     file_source_stamp(database, id).2
-}
-
-#[cfg(windows)]
-pub(super) fn non_durable_file_stamp(metadata: &std::fs::Metadata) -> FileStamp {
-    FileStamp {
-        len: metadata.len(),
-        modified: metadata.modified().ok(),
-        created: metadata.created().ok(),
-        durable_reusable: false,
-    }
 }
 
 fn stamp_path(path: &std::path::Path) -> Result<FileStamp, ()> {
@@ -164,26 +141,7 @@ pub(in crate::markdown::svg_rasterize) fn stamp_path_uncached(
         super::super::super::font::observation::Metric::StampMetadata,
     );
     let metadata = std::fs::metadata(path).map_err(|_| ())?;
-    #[cfg(unix)]
-    use std::os::unix::fs::MetadataExt;
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    let durable_reusable = super::filesystem_policy::durable_reusable(path, metadata.ctime_nsec());
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    let durable_reusable = false;
-    Ok(FileStamp {
-        len: metadata.len(),
-        modified: metadata.modified().ok(),
-        created: metadata.created().ok(),
-        durable_reusable,
-        #[cfg(unix)]
-        device: metadata.dev(),
-        #[cfg(unix)]
-        inode: metadata.ino(),
-        #[cfg(unix)]
-        changed_seconds: metadata.ctime(),
-        #[cfg(unix)]
-        changed_nanoseconds: metadata.ctime_nsec(),
-    })
+    Ok(stamp_for_metadata(path, &metadata))
 }
 
 #[cfg(all(test, target_os = "macos"))]

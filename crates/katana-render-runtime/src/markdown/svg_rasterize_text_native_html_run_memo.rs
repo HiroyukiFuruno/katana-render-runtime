@@ -130,7 +130,7 @@ impl Memo {
         if self.faces.len() >= MAX_PHYSICAL_FONTS {
             return None;
         }
-        let face = self.files.resolve(font, metadata, stamp)?;
+        let face = self.files.resolve(font, metadata, stamp, &self.faces)?;
         self.faces.push(face);
         self.faces.last()
     }

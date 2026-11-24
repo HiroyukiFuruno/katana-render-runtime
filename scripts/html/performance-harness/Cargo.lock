@@ -1112,6 +1112,7 @@ dependencies = [
  "paste",
  "percent-encoding",
  "read-fonts 0.47.0",
+ "reflink-copy",
  "rgb",
  "roxmltree 0.21.2",
  "rustybuzz",
@@ -1126,6 +1127,7 @@ dependencies = [
  "strict-num 0.2.0",
  "svgtypes",
  "taffy 0.15.1",
+ "tempfile",
  "temporal_capi",
  "tendril",
  "thiserror",
@@ -1693,6 +1695,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "reflink-copy"
+version = "0.1.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20d23b61573e4e96a48e3196327eedc4d50e30ba1ea1eae3f08187b44542e642"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "rustix 1.1.6",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

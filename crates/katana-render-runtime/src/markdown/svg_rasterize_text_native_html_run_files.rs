@@ -2,7 +2,7 @@ use super::super::super::font::platform_fallback::actual_fallback::{
     ActualCoreTextFace, ActualCoreTextFontMetadata, actual_face_for, face_index, name_table,
 };
 use super::super::super::font::{FileStamp, observe_path_stamp};
-use super::super::super::harfrust::{MappedFontBytes, eligible_immutable_system_path};
+use super::super::super::harfrust::MappedFontBytes;
 use super::MAX_PHYSICAL_FONTS;
 use objc2_core_text::CTFont;
 use resvg::usvg::fontdb::{Database, ID, Source};
@@ -16,6 +16,9 @@ use std::{
 
 #[path = "svg_rasterize_text_native_html_mapping_pool.rs"]
 mod mapping_pool;
+#[path = "svg_rasterize_text_selected_font_snapshot.rs"]
+mod selected_snapshot;
+use selected_snapshot::{map_large_source, map_source};
 
 const SHA256_DIGEST_BYTES: usize = 32;
 const MAPPED_FONT_SESSION_BYTES: u64 = 64 * 1024 * 1024;
@@ -58,13 +61,6 @@ impl FileFace {
     pub(super) fn with_face_data<T>(&self, inspect: impl FnOnce(&[u8], u32) -> T) -> Option<T> {
         self.database.with_face_data(self.id, inspect)
     }
-
-    fn mapped_bytes(&self) -> u64 {
-        match self.database.face_source(self.id) {
-            Some((Source::SharedFile(_, data), _)) => data.as_ref().as_ref().len() as u64,
-            _ => 0,
-        }
-    }
 }
 
 #[derive(Clone, Default)]
@@ -78,6 +74,7 @@ impl NativeFontFileCache {
         font: &CTFont,
         metadata: &ActualCoreTextFontMetadata,
         stamp: FileStamp,
+        frame_faces: &[FileFace],
     ) -> Option<FileFace> {
         /* WHY: 選択されたname tableも照合し、同じ物理書体の解析結果だけを再利用する。 */
         let name_table = stamp
@@ -87,10 +84,10 @@ impl NativeFontFileCache {
         if let Some(face) = name_table.and_then(|digest| self.find(metadata, &stamp, digest)) {
             return Some(face);
         }
-        let mapped = name_table.and_then(|_| self.map_face(metadata, &stamp));
+        let mapped = name_table.and_then(|_| self.map_face(metadata, &stamp, frame_faces));
         let actual = actual_face(font, metadata, mapped.as_ref())?;
         let face = FileFace::from_actual(actual, stamp, name_table, mapped)?;
-        if name_table.is_some() {
+        if name_table.is_some() && !face.is_large_mapping() {
             self.store(face.clone());
         }
         Some(face)
@@ -100,7 +97,14 @@ impl NativeFontFileCache {
         &self,
         metadata: &ActualCoreTextFontMetadata,
         stamp: &FileStamp,
+        frame_faces: &[FileFace],
     ) -> Option<MappedFontBytes> {
+        let path = &metadata.canonical_path;
+        let length = stamp.file_length();
+        if length > MAPPED_FONT_SESSION_BYTES {
+            let frame_large_face = frame_faces.iter().find(|face| face.is_large_mapping());
+            return map_large_source(path, stamp, length, frame_large_face);
+        }
         let resident = self
             .0
             .borrow()
@@ -108,7 +112,7 @@ impl NativeFontFileCache {
             .map(FileFace::mapped_bytes)
             .sum::<u64>();
         map_source(
-            &metadata.canonical_path,
+            path,
             stamp,
             MAPPED_FONT_SESSION_BYTES.saturating_sub(resident),
         )
@@ -135,15 +139,6 @@ impl NativeFontFileCache {
         }
         faces.push(face);
     }
-}
-
-fn map_source(path: &Path, stamp: &FileStamp, remaining: u64) -> Option<MappedFontBytes> {
-    let length = std::fs::metadata(path).ok()?.len();
-    if length > remaining || !eligible_immutable_system_path(path, length).ok()? {
-        return None;
-    }
-    let bytes = mapping_pool::acquire(path, stamp, length)?;
-    (observe_path_stamp(path).as_ref() == Ok(stamp)).then_some(bytes)
 }
 
 fn actual_face(

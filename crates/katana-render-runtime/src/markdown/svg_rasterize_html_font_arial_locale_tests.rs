@@ -11,7 +11,7 @@ const HAN_FALLBACK_TEXT: &str = "骨";
 
 #[test]
 fn actual_layout_named_arial_respects_han_fallback_language() -> Result<(), String> {
-    for lang in ["ja", "ko"] {
+    for lang in ["ja", "ko", "zh-Hans", "zh-Hant"] {
         let postscript = arial_han_coretext_fallback(lang);
         let html = format!(
             "<!doctype html><html lang='{lang}'><p style='font-family:Arial;font-size:{ARIAL_FONT_SIZE}px'>{HAN_FALLBACK_TEXT}</p>"

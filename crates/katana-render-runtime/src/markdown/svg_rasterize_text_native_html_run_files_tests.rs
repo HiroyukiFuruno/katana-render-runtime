@@ -1,6 +1,5 @@
-use super::{
-    MAPPED_FONT_SESSION_BYTES, eligible_immutable_system_path, map_source, observe_path_stamp,
-};
+use super::{MAPPED_FONT_SESSION_BYTES, map_source, observe_path_stamp};
+use crate::markdown::svg_rasterize::text_shaping::harfrust::eligible_immutable_system_path;
 use std::{error::Error, path::Path};
 
 const SYSTEM_FONT: &str = "/System/Library/Fonts/Helvetica.ttc";

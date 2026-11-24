@@ -11,7 +11,7 @@ mod glyph_cache;
 mod stamp_batch;
 #[cfg(target_os = "macos")]
 pub(in crate::markdown::svg_rasterize) use file_generation::{
-    FileStamp, observe_path_stamp, stamp_path_uncached,
+    FileStamp, observe_path_stamp, stamp_open_font_file, stamp_path_uncached,
 };
 pub(super) use file_generation::{
     FontSourceGeneration, font_source_generation, font_source_generation_uncached,
