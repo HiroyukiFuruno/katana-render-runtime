@@ -19,6 +19,8 @@
 - [x] 初回ラスタライズ入口の`vmmap`では公開版・書体再利用候補の確保領域が2,146 KiB・3,195 KiBだった。既存の一時オブジェクト解放を代替書体取得単位に絞った試行は、関連34テストと先頭PNGの一致を確認したが、初回ピークRSSは比較対象の39.23 MiBから39.41 MiBに増えたため取り消した（`tmp/quality/resumed-owner-r3509/release-v0424-coretext-vmmap-first-raster-7rdwa5l5/`、`tmp/quality/resumed-owner-r3509/release-v0424-coretext-temporary-pool-paired-kyeji_7f/safe-summary.json`）。
 - [x] 初回ラスタライズ直前の割り当て調査で、同梱のNoto Sansを2回コピーしていることを確認した（計557,104バイト）。HTMLとSVGの書体DBが実行ファイル内の同じ読み取り専用データを参照するよう共通化した。関連96テスト、書式・AST・性能ハーネスの固定依存を確認した（`tmp/quality/resumed-owner-r3509/release-v0424-first-raster-allocation-stacks-kj3a9gst/`、`tmp/quality/resumed-owner-r3509/release-v0424-selected-font-snapshot-bundled-font-zero-copy-k6p74_bw/`）。
 - [/] フォーム25組の限定計測で先頭PNGの一致を確認した。初回表示の中央値は公開版67.69 ms、直前候補29.15 ms、共有後30.87 ms。ピークRSSは公開版31.09 MiB、直前候補39.23 MiB、共有後38.44 MiBで、公開版との差が8.14から7.34 MiBに下がった。6段階すべてピークRSS差が8 MiB未満。正式性能84条件と現行候補の描画検証は残る（`tmp/quality/resumed-owner-r3509/release-v0424-embedded-font-zero-copy-paired-cjxkx4in/safe-summary.json`）。
+- [ ] 同じ25組を既存v6判定で確認した。初回表示、操作後、リサイズのピークメモリ判定は許容。再オープンは+7.312 MiB・0.035 ms短縮、再表示は+7.297 MiB・0.009 ms短縮で、速度改善の条件を満たさなかった。無操作の縦スクロールは再表示と同じピークを引き継ぐ。正式計測に進む前に再オープンと再表示を改善する（`tmp/quality/resumed-owner-r3509/release-v0424-embedded-font-zero-copy-paired-cjxkx4in/peak-policy-scoped.json`）。
+- [x] Mermaidの管理ビルドが、RTKのシェルが子に渡す`OLDPWD`を未許可入力として拒否した。JustのCLIビルド入口でこの項目だけを除き、既知入力の一覧と未知項目の拒否を維持した。producerと容量ガードの回帰、および実レシピの展開を確認した。現行候補で117図の正式比較を再実行する（`tmp/quality/resumed-owner-r3509/release-v0424-ca61399d-mermaid-current-b4ravz_3/`、`tmp/quality/resumed-owner-r3509/release-v0424-native-cli-shell-metadata-test-8wdc14la/`）。
 
 ## スクロールが発生しない条件の性能判定（2026-11-24）
 

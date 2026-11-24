@@ -31,6 +31,7 @@ SCHEMA = "krr-native-cli-managed-build-v3"
 CONTROL_MANIFEST_SCHEMA = "krr-native-cli-managed-control-inputs-v1"
 CONTROL_MANIFEST_NAME = "scripts/mermaid/native-cli-managed-control-inputs.json"
 CONTROL_MANIFEST = Path(__file__).with_name("native-cli-managed-control-inputs.json")
+BUILD_RECIPE = "unset OLDPWD; {{CARGO_BUILD}} build -p katana-render-runtime-cli"
 
 
 def parse_control_manifest(value: object) -> tuple[str, ...]:
@@ -144,7 +145,7 @@ def validate_just(root: Path) -> None:
                 'CARGO_BUILD := "python3 " + quote(REPO_ROOT + "/scripts/build/cargo_capacity_guard.py") + " --retain-build-profile debug -- " + CARGO',
                 'export RUSTFLAGS := env_var_or_default("RUSTFLAGS", "-D warnings")',
                 'rust-facts-host-prebuild:\n    bun scripts/runtime-bundles/runtime-rust-facts-host.ts prepare {{quote(REPO_ROOT)}} {{quote(REPO_ROOT + "/tmp/quality/rust-facts-host/current/receipt.json")}}\n',
-                'krr-build:\n    {{CARGO_BUILD}} build -p katana-render-runtime-cli\n',
+                f"krr-build:\n    {BUILD_RECIPE}\n",
                 'protected-capacity-admission protected_registry:\n'
                 '    python3 scripts/mermaid/native_cli_build_bindings.py --repo {{quote(REPO_ROOT)}} '
                 '--protected-registry {{quote(protected_registry)}}\n']
@@ -160,7 +161,7 @@ def validate_just(root: Path) -> None:
                   "fixed Rust facts host prebuild route differs")
     recipe = re.search(r"^krr-build:\n((?:[ \t]+.*\n|\n)*)", text, re.MULTILINE)
     guard.require(recipe is not None and recipe[1].strip()
-                  == "{{CARGO_BUILD}} build -p katana-render-runtime-cli", "extra Just build command")
+                  == BUILD_RECIPE, "extra Just build command")
     admission = re.search(r"^protected-capacity-admission protected_registry:\n((?:[ \t]+.*\n|\n)*)",
                           text, re.MULTILINE)
     guard.require(admission is not None and admission[1].strip()

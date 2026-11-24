@@ -806,8 +806,9 @@ browser-install:
     @if [[ "$(uname -s)" == "Linux" ]]; then bunx playwright install --with-deps chromium; else bunx playwright install chromium; fi
 
 # Build the local krr CLI once before parallel fixture compares
+# WHY: RTKのシェルが作る直前の作業ディレクトリは、固定したCargo入力に含めない。
 krr-build:
-    {{CARGO_BUILD}} build -p katana-render-runtime-cli
+    unset OLDPWD; {{CARGO_BUILD}} build -p katana-render-runtime-cli
 
 # Force-update all Rust and JavaScript dependencies plus pinned runtime assets, then run required checks
 depends-update-all:
