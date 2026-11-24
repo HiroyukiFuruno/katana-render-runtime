@@ -26,6 +26,23 @@ class MemoryEvidenceTest(unittest.TestCase):
         self.assertEqual(set(gate._object(result["phases"], "phases")), set(gate.PHASES))
         self.assertEqual(before, {path: path.read_bytes() for path in self.paths})
 
+    def test_incremental_policy_accepts_lower_candidate_memory(self) -> None:
+        for path in self.paths:
+            report = gate.read_json(path)
+            for sample in gate._objects(report["samples"], "samples"):
+                for phase in gate.PHASES:
+                    entry = gate._object(gate._object(sample["phases"], "phases")[phase], "phase")
+                    measured = gate._object(entry["measurement"], "measurement") if phase in (
+                        "post_operation", "same_session_resize",
+                    ) else entry
+                    measured["peak_rss_bytes"] = (99 if path.name.startswith("candidate-") else 100) * policy.MIB
+            path.write_text(json.dumps(report))
+        result = evidence.evaluate_paired(
+            self.paths, self.expected, self.retained,
+            policy_version=policy.INCREMENTAL_RSS_POLICY_VERSION,
+        )
+        self.assertTrue(result["policyPass"])
+
     def test_explicit_v2_and_v3_keep_v1_and_apply_own_retention_budget(self) -> None:
         retained = [40 * policy.MIB] * 15 + [44 * policy.MIB] * 10
         legacy = evidence.evaluate_paired(self.paths, self.expected, retained,

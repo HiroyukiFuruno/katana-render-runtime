@@ -115,8 +115,8 @@ def evaluate_paired(
                 )
             ]
             bounded = all(
-                gate._number(gate._object(phase_result[key], "peak delta")["delta_bytes"], "delta bytes") <= memory.MAX_PEAK_BYTES
-                and gate._number(gate._object(phase_result[key], "peak delta")["delta_ratio"], "delta ratio") <= memory.MAX_PEAK_RATIO
+                float(cast(float, gate._object(phase_result[key], "peak delta")["delta_bytes"])) <= memory.MAX_PEAK_BYTES
+                and float(cast(float, gate._object(phase_result[key], "peak delta")["delta_ratio"])) <= memory.MAX_PEAK_RATIO
                 for key in ("median", "p95", "maximum")
             )
             increments_valid = all(
