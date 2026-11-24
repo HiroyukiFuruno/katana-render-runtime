@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -16,6 +17,7 @@ import produce_html_performance_evidence as producer
 import verify_html_performance_evidence as gate
 
 MAX_LINE_BYTES = 8 * 1024
+MAX_TOOL_OUTPUT_BYTES = 16 * 1024 * 1024
 MALLOC_REGION = re.compile(
     r"^(Malloc [A-Za-z]+(?: \(empty\))?)\s+[0-9a-fA-F]+-[0-9a-fA-F]+\s+"
     r"\[\s+\S+\s+(\S+)\s+(\S+)"
@@ -46,6 +48,22 @@ def heap_summary(text: str) -> dict[str, int]:
     matches = re.findall(r"^All zones: (\d+) nodes \((\d+) bytes\)$", text, re.MULTILINE)
     gate.require(len(matches) == 1, "heap summary is unavailable or ambiguous")
     return {"allocations": int(matches[0][0]), "bytes": int(matches[0][1])}
+
+
+def bounded_tool_output(arguments: list[str], deadline: float) -> str:
+    remaining = deadline - time.monotonic()
+    gate.require(remaining > 0, "open diagnostic deadline expired")
+    # POSIX sh applies the file-size limit after exec, without a preexec_fn in this process.
+    limit_kib = MAX_TOOL_OUTPUT_BYTES // 1024
+    command = ["/bin/sh", "-c", f'ulimit -f {limit_kib} || exit 125; exec "$@"',
+               "krr-diagnostic", *arguments]
+    with tempfile.TemporaryFile() as output:
+        result = subprocess.run(command, stdout=output, stderr=subprocess.DEVNULL,
+                                check=False, timeout=min(30.0, remaining))
+        gate.require(result.returncode == 0, f"diagnostic tool exited {result.returncode}")
+        gate.require(output.tell() <= MAX_TOOL_OUTPUT_BYTES, "diagnostic tool output exceeds limit")
+        output.seek(0)
+        return output.read(MAX_TOOL_OUTPUT_BYTES + 1).decode("utf-8")
 
 
 class OpenInteraction:
@@ -80,16 +98,8 @@ class OpenInteraction:
             self.started = started
         gate.require(started == self.started and observed.is_running(), "worker identity changed")
         self.samples.append(observed.memory_info().rss)
-        remaining = deadline - time.monotonic()
-        gate.require(remaining > 0, "open diagnostic deadline expired")
-        result = subprocess.run(["vmmap", "-wide", str(process.pid)], capture_output=True,
-                                text=True, check=True, timeout=min(30.0, remaining))
-        self.regions.append(malloc_regions(result.stdout))
-        remaining = deadline - time.monotonic()
-        gate.require(remaining > 0, "open diagnostic deadline expired")
-        heap = subprocess.run(["heap", "-s", "-q", str(process.pid)], capture_output=True,
-                              text=True, check=True, timeout=min(30.0, remaining))
-        self.heap.append(heap_summary(heap.stdout))
+        self.regions.append(malloc_regions(bounded_tool_output(["vmmap", "-wide", str(process.pid)], deadline)))
+        self.heap.append(heap_summary(bounded_tool_output(["heap", "-s", "-q", str(process.pid)], deadline)))
         gate.require(time.monotonic() < deadline and process.poll() is None
                      and psutil.Process(process.pid).create_time() == started,
                      "worker identity changed during vmmap")
@@ -102,7 +112,7 @@ class OpenInteraction:
 
 def collect(binary: Path, fixture: Path, width: int, height: int, scale: float,
             output: Path) -> None:
-    gate.require(os.name == "posix" and binary.is_file() and fixture.is_file(),
+    gate.require(sys.platform == "darwin" and binary.is_file() and fixture.is_file(),
                  "diagnostic inputs unavailable")
     binary_hash, fixture_hash = gate.sha256(binary), gate.sha256(fixture)
     interaction = OpenInteraction()

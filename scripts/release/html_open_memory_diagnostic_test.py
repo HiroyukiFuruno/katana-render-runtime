@@ -6,7 +6,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from typing import cast
+from typing import BinaryIO, cast
 from unittest.mock import Mock
 from unittest.mock import patch
 
@@ -16,6 +16,12 @@ import html_open_memory_diagnostic as diagnostic
 
 
 class OpenInteractionTest(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "darwin", "macOS diagnostic file-size contract")
+    def test_tool_file_limit_matches_declared_cap(self) -> None:
+        code = "import resource; print(resource.getrlimit(resource.RLIMIT_FSIZE)[0])"
+        observed = diagnostic.bounded_tool_output([sys.executable, "-c", code], time.monotonic() + 10)
+        self.assertEqual(int(observed.strip()), diagnostic.MAX_TOOL_OUTPUT_BYTES)
+
     def test_expired_deadline_does_not_start_vmmap(self) -> None:
         fake_worker = Mock(spec=subprocess.Popen)
         fake_worker.poll.return_value = None
@@ -45,6 +51,17 @@ class OpenInteractionTest(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "unavailable or ambiguous"):
                 diagnostic.heap_summary(invalid)
 
+    def test_bounded_tool_rejects_oversized_output(self) -> None:
+        def oversized(*_args: object, **kwargs: object) -> Mock:
+            stream = cast(BinaryIO, kwargs["stdout"])
+            stream.write(b"x" * 33)
+            return Mock(returncode=0)
+
+        with (patch.object(diagnostic, "MAX_TOOL_OUTPUT_BYTES", 32),
+              patch.object(subprocess, "run", side_effect=oversized)):
+            with self.assertRaisesRegex(ValueError, "output exceeds limit"):
+                diagnostic.bounded_tool_output(["vmmap"], time.monotonic() + 10)
+
     def test_rejects_unterminated_oversized_line(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "stdout"
@@ -63,10 +80,10 @@ class OpenInteractionTest(unittest.TestCase):
             )
             try:
                 interaction = diagnostic.OpenInteraction()
-                with patch.object(subprocess, "run", return_value=Mock(stdout=(
+                with patch.object(diagnostic, "bounded_tool_output", return_value=(
                     "Malloc Small (empty) 1000-2000 [ 4.0M 32K 16K 0K ] rw-/rwx\n"
                     "All zones: 42 nodes (1024 bytes)\n"
-                ))):
+                )):
                     interaction(process, output, time.monotonic() + 10)
                     self.assertEqual(len(interaction.samples), 1)
                     with output.open("ab") as stream:
