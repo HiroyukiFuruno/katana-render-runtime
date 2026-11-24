@@ -38,6 +38,13 @@ class OpenInteractionTest(unittest.TestCase):
             "Malloc Small (empty)": {"resident": 32768, "dirty": 16384},
         })
 
+    def test_heap_summary_requires_one_unambiguous_total(self) -> None:
+        self.assertEqual(diagnostic.heap_summary("All zones: 42 nodes (1024 bytes)\n"),
+                         {"allocations": 42, "bytes": 1024})
+        for invalid in ("", "All zones: 1 nodes (1 bytes)\n" * 2):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "unavailable or ambiguous"):
+                diagnostic.heap_summary(invalid)
+
     def test_rejects_unterminated_oversized_line(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "stdout"
@@ -58,6 +65,7 @@ class OpenInteractionTest(unittest.TestCase):
                 interaction = diagnostic.OpenInteraction()
                 with patch.object(subprocess, "run", return_value=Mock(stdout=(
                     "Malloc Small (empty) 1000-2000 [ 4.0M 32K 16K 0K ] rw-/rwx\n"
+                    "All zones: 42 nodes (1024 bytes)\n"
                 ))):
                     interaction(process, output, time.monotonic() + 10)
                     self.assertEqual(len(interaction.samples), 1)

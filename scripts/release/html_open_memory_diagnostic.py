@@ -42,11 +42,18 @@ def malloc_regions(text: str) -> dict[str, dict[str, int]]:
     return regions
 
 
+def heap_summary(text: str) -> dict[str, int]:
+    matches = re.findall(r"^All zones: (\d+) nodes \((\d+) bytes\)$", text, re.MULTILINE)
+    gate.require(len(matches) == 1, "heap summary is unavailable or ambiguous")
+    return {"allocations": int(matches[0][0]), "bytes": int(matches[0][1])}
+
+
 class OpenInteraction:
     def __init__(self) -> None:
         self.offset = 0
         self.samples: list[int] = []
         self.regions: list[dict[str, dict[str, int]]] = []
+        self.heap: list[dict[str, int]] = []
         self.started: float | None = None
 
     def __call__(self, process: subprocess.Popen[bytes], output: Path, deadline: float) -> None:
@@ -78,6 +85,11 @@ class OpenInteraction:
         result = subprocess.run(["vmmap", "-wide", str(process.pid)], capture_output=True,
                                 text=True, check=True, timeout=min(30.0, remaining))
         self.regions.append(malloc_regions(result.stdout))
+        remaining = deadline - time.monotonic()
+        gate.require(remaining > 0, "open diagnostic deadline expired")
+        heap = subprocess.run(["heap", "-s", "-q", str(process.pid)], capture_output=True,
+                              text=True, check=True, timeout=min(30.0, remaining))
+        self.heap.append(heap_summary(heap.stdout))
         gate.require(time.monotonic() < deadline and process.poll() is None
                      and psutil.Process(process.pid).create_time() == started,
                      "worker identity changed during vmmap")
@@ -112,6 +124,7 @@ def collect(binary: Path, fixture: Path, width: int, height: int, scale: float,
                    "beforeRss": interaction.samples[0], "afterRss": interaction.samples[1],
                    "beforeMallocRegions": interaction.regions[0],
                    "afterMallocRegions": interaction.regions[1],
+                   "beforeHeap": interaction.heap[0], "afterHeap": interaction.heap[1],
                    "exitCode": result.returncode, "groupClosed": True, "rawFdsClosed": True}
         descriptor = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
