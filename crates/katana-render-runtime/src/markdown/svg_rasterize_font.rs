@@ -1,6 +1,7 @@
 #[cfg(all(test, target_os = "macos"))]
 pub(super) use html::raster_observer as observation;
 use resvg::usvg;
+use std::sync::{Arc, OnceLock};
 #[path = "svg_rasterize_html_font.rs"]
 mod html;
 
@@ -30,7 +31,7 @@ pub(super) use html::{
     html_font_memory_snapshot,
 };
 
-const BUNDLED_SANS_SERIF_FONT: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
+static BUNDLED_SANS_SERIF_FONT: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 const SANS_SERIF_FAMILIES: &[&str] = &[
     "Noto Sans",
     "Noto Sans JP",
@@ -91,10 +92,18 @@ pub(super) fn bundled_font_db() -> std::sync::Arc<usvg::fontdb::Database> {
     std::sync::Arc::clone(FONT_DB.get_or_init(|| {
         let mut db = usvg::fontdb::Database::new();
         /* WHY: 公開 SVG rasterizer の pixel 出力を host font から独立させる。 */
-        db.load_font_data(BUNDLED_SANS_SERIF_FONT.to_vec());
+        db.load_font_source(bundled_font_source());
         configure_generic_families(&mut db);
         std::sync::Arc::new(db)
     }))
+}
+
+fn bundled_font_source() -> usvg::fontdb::Source {
+    static DATA: OnceLock<Arc<dyn AsRef<[u8]> + Send + Sync>> = OnceLock::new();
+    /* WHY: HTMLとSVGの書体DBが実行ファイルの同じ読み取り専用データを参照する。 */
+    usvg::fontdb::Source::Binary(Arc::clone(
+        DATA.get_or_init(|| Arc::new(BUNDLED_SANS_SERIF_FONT)),
+    ))
 }
 
 pub(super) fn configure_generic_families(database: &mut usvg::fontdb::Database) {
@@ -142,10 +151,28 @@ pub(super) use html::rasterize_html_known_or_eager;
 #[cfg(test)]
 mod tests {
     use super::{
-        BUNDLED_SANS_SERIF_FONT, CURSIVE_FAMILIES, FANTASY_FAMILIES, configure_generic_families,
-        first_available_family,
+        Arc, BUNDLED_SANS_SERIF_FONT, CURSIVE_FAMILIES, FANTASY_FAMILIES, bundled_font_db,
+        bundled_font_source, configure_generic_families, first_available_family,
     };
     use resvg::usvg;
+
+    #[test]
+    fn bundled_font_databases_use_the_embedded_bytes_without_copying() -> Result<(), &'static str> {
+        let database = bundled_font_db();
+        let face = database.faces().next().ok_or("bundled font unavailable")?;
+        let (usvg::fontdb::Source::Binary(svg), _) = database
+            .face_source(face.id)
+            .ok_or("bundled font source unavailable")?
+        else {
+            return Err("expected a binary SVG font source");
+        };
+        let usvg::fontdb::Source::Binary(html) = bundled_font_source() else {
+            return Err("expected a binary HTML font source");
+        };
+        assert!(Arc::ptr_eq(&svg, &html));
+        assert!(std::ptr::eq(svg.as_ref().as_ref(), BUNDLED_SANS_SERIF_FONT));
+        Ok(())
+    }
 
     #[test]
     fn bundled_font_resolves_every_generic_family_without_host_fonts() {

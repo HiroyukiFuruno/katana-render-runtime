@@ -1,3 +1,4 @@
+use super::super::bundled_font_source;
 use super::request::HtmlFontRequest;
 use super::system;
 use resvg::usvg;
@@ -20,7 +21,6 @@ use paths::{
     CJK_FONT_PATHS, CJK_SERIF_FONT_PATHS, EMOJI_FONT_PATHS, SYSTEM_CJK_FONT_PATHS,
     UNICODE_FALLBACK_FONT_PATHS,
 };
-use source_identity::bundled_font_source;
 pub(super) use source_identity::canonical_font_source_path;
 #[cfg(test)]
 pub(super) use source_identity::load_font_paths;

@@ -1,17 +1,5 @@
-use super::super::super::BUNDLED_SANS_SERIF_FONT;
 use resvg::usvg;
-use std::{
-    collections::BTreeSet,
-    path::Path,
-    sync::{Arc, OnceLock},
-};
-
-pub(super) fn bundled_font_source() -> usvg::fontdb::Source {
-    static BUNDLED_FONT_DATA: OnceLock<Arc<dyn AsRef<[u8]> + Send + Sync>> = OnceLock::new();
-    usvg::fontdb::Source::Binary(Arc::clone(
-        BUNDLED_FONT_DATA.get_or_init(|| Arc::new(BUNDLED_SANS_SERIF_FONT.to_vec())),
-    ))
-}
+use std::{collections::BTreeSet, path::Path};
 
 #[cfg(test)]
 pub(in super::super) fn load_font_paths(

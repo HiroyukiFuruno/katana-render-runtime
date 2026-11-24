@@ -17,7 +17,8 @@
 - [ ] 最終候補をmacOS Apple Silicon、Windows x64、Linux x64の必須CIで確認する。macOSのCoreText経路は大容量TTCを含む代替書体と表示性能、WindowsのDirectWrite経路は同一入力での書体と大文書の初回表示、LinuxのFontconfig経路はChrome比較と操作後の表示を確認する。
 - [x] 手動のWindows x64大文書表示とLinux x64のHTML 5入力・書体回帰を並列で実行した。両方とも`release/verify`の`b7bd0f69`から候補`58834826`を取得した。Windowsの匿名化要件書は最適化ビルドで初回表示1.433秒。Linuxは画像30/30枚が90点以上（最低91.01点）、書体テスト3/3件が成功した。[Windows](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/45400900145)・[Linux](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/45400900139)
 - [x] 初回ラスタライズ入口の`vmmap`では公開版・書体再利用候補の確保領域が2,146 KiB・3,195 KiBだった。既存の一時オブジェクト解放を代替書体取得単位に絞った試行は、関連34テストと先頭PNGの一致を確認したが、初回ピークRSSは比較対象の39.23 MiBから39.41 MiBに増えたため取り消した（`tmp/quality/resumed-owner-r3509/release-v0424-coretext-vmmap-first-raster-7rdwa5l5/`、`tmp/quality/resumed-owner-r3509/release-v0424-coretext-temporary-pool-paired-kyeji_7f/safe-summary.json`）。
-- [ ] 言語による代替書体の選択と、現行の性能基準を満たす。主書体再利用のフォーム25組診断で初回表示の中央値は公開版66.51 ms、直前候補29.36 ms、今回30.86 ms。ピークRSSの差は直前候補+8.25 MiBから今回+8.14 MiBへ縮んだ。上限8 MiBと正式性能84条件の判定が残る（`tmp/quality/resumed-owner-r3509/release-v0424-coretext-base-query-paired-_kzd6fwj/safe-summary.json`）。
+- [x] 初回ラスタライズ直前の割り当て調査で、同梱のNoto Sansを2回コピーしていることを確認した（計557,104バイト）。HTMLとSVGの書体DBが実行ファイル内の同じ読み取り専用データを参照するよう共通化した。関連96テスト、書式・AST・性能ハーネスの固定依存を確認した（`tmp/quality/resumed-owner-r3509/release-v0424-first-raster-allocation-stacks-kj3a9gst/`、`tmp/quality/resumed-owner-r3509/release-v0424-selected-font-snapshot-bundled-font-zero-copy-k6p74_bw/`）。
+- [/] フォーム25組の限定計測で先頭PNGの一致を確認した。初回表示の中央値は公開版67.69 ms、直前候補29.15 ms、共有後30.87 ms。ピークRSSは公開版31.09 MiB、直前候補39.23 MiB、共有後38.44 MiBで、公開版との差が8.14から7.34 MiBに下がった。6段階すべてピークRSS差が8 MiB未満。正式性能84条件と現行候補の描画検証は残る（`tmp/quality/resumed-owner-r3509/release-v0424-embedded-font-zero-copy-paired-cjxkx4in/safe-summary.json`）。
 
 ## スクロールが発生しない条件の性能判定（2026-11-24）
 
