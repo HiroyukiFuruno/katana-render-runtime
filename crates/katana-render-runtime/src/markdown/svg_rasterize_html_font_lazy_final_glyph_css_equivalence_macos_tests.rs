@@ -3,6 +3,9 @@ use super::{
     assert_html_frame, assert_valid_paint_evidence, open_html_with_audit,
 };
 
+#[path = "svg_rasterize_html_font_arial_locale_tests.rs"]
+mod arial_locale_tests;
+
 const ZH_HANS_PAGE_START: &str = "<!doctype html><html lang=\"zh-Hans\"><body>";
 const ZH_HANS_BOLD: &str =
     "<h1 style=\"font-family:system-ui,sans-serif;font-size:32px;font-weight:700\">装</h1>";
@@ -99,7 +102,13 @@ fn assert_uses_expected_face(
     expected_axes: &[(&str, f32)],
 ) {
     assert!(
-        final_span_uses_face_matching(trees, weight, |name| name == expected, expected_axes),
+        final_span_uses_face_matching(
+            trees,
+            weight,
+            |name| name == expected,
+            expected_axes,
+            |_| true
+        ),
         "missing {expected} with {expected_axes:?} at weight {weight}; requested {:?}; glyph errors {:?}; observed faces {:?}",
         rows_for_weight(audit, weight),
         trees
@@ -175,7 +184,7 @@ fn assert_computed_weight(audit: &serde_json::Value, weight: u64) -> Result<(), 
 }
 
 fn final_span_uses_face(trees: &[serde_json::Value], weight: u64, postscript: &str) -> bool {
-    final_span_uses_face_matching(trees, weight, |name| name == postscript, &[])
+    final_span_uses_face_matching(trees, weight, |name| name == postscript, &[], |_| true)
 }
 
 fn final_span_uses_face_prefix(trees: &[serde_json::Value], weight: u64, prefix: &str) -> bool {
@@ -187,6 +196,7 @@ fn final_span_uses_face_prefix(trees: &[serde_json::Value], weight: u64, prefix:
         weight,
         |name| name.starts_with(prefix),
         &[("wght", actual_wght)],
+        |_| true,
     )
 }
 
@@ -195,10 +205,11 @@ fn final_span_uses_face_matching(
     weight: u64,
     matches_name: impl Fn(&str) -> bool,
     expected_axes: &[(&str, f32)],
+    matches_span: impl Fn(&serde_json::Value) -> bool,
 ) -> bool {
-    trees
-        .iter()
-        .any(|tree| tree_has_weighted_face(tree, weight, &matches_name, expected_axes))
+    trees.iter().any(|tree| {
+        tree_has_weighted_face(tree, weight, &matches_name, expected_axes, &matches_span)
+    })
 }
 
 fn tree_has_weighted_face(
@@ -206,6 +217,7 @@ fn tree_has_weighted_face(
     weight: u64,
     matches_name: &impl Fn(&str) -> bool,
     expected_axes: &[(&str, f32)],
+    matches_span: &impl Fn(&serde_json::Value) -> bool,
 ) -> bool {
     let Some(faces) = tree["faces"].as_array() else {
         return false;
@@ -215,7 +227,7 @@ fn tree_has_weighted_face(
             && face["source"]["post_script_name"]
                 .as_str()
                 .is_some_and(matches_name)
-            && tree_span_uses_face(tree, &face["faceId"], weight, expected_axes)
+            && tree_span_uses_face(tree, &face["faceId"], weight, expected_axes, matches_span)
     })
 }
 
@@ -224,10 +236,12 @@ fn tree_span_uses_face(
     face_id: &serde_json::Value,
     weight: u64,
     expected_axes: &[(&str, f32)],
+    matches_span: &impl Fn(&serde_json::Value) -> bool,
 ) -> bool {
     tree["textSpans"].as_array().is_some_and(|spans| {
         spans.iter().any(|span| {
-            span["requested"]["weight"] == weight
+            matches_span(span)
+                && span["requested"]["weight"] == weight
                 && span["glyphCount"].as_u64().is_some_and(|count| count > 0)
                 && expected_axes
                     .iter()
