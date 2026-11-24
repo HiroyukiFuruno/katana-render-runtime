@@ -76,6 +76,52 @@ class RetentionCaptureTest(unittest.TestCase):
         self.assertEqual([record["cycle"] for record in records], list(range(105)))
         self.assertEqual([record["warmup"] for record in records], [True] * 5 + [False] * 100)
 
+    def test_before_ack_observes_each_ready_worker_identity(self) -> None:
+        observed: list[retention.RetentionBarrier] = []
+
+        def observe_before_ack(barrier: retention.RetentionBarrier, deadline: float) -> None:
+            self.assertGreater(deadline, 0)
+            self.assertEqual(self.seen[-1], barrier.cycle)
+            observed.append(barrier)
+
+        result = retention.capture(
+            [self.python, "-c", _PROBE, "normal", "--retention-diagnostic"], cwd=self.root, env=self.env,
+            output=self.root / "before-ack", validate_sample=self.validate_sample,
+            before_ack=observe_before_ack,
+        )
+        records = [json.loads(line) for line in (result.directory / "memory.jsonl").read_bytes().splitlines()]
+        self.assertEqual([barrier.cycle for barrier in observed], list(range(105)))
+        self.assertEqual({barrier.pid for barrier in observed}, {record["pid"] for record in records})
+        self.assertEqual({barrier.create_time for barrier in observed}, {record["createTime"] for record in records})
+
+    def test_before_ack_failure_reaps_waiting_worker(self) -> None:
+        def fail_before_ack(barrier: retention.RetentionBarrier, deadline: float) -> None:
+            del deadline
+            if barrier.cycle == 1:
+                raise RuntimeError("diagnostic failure")
+
+        with self.assertRaisesRegex(RuntimeError, "diagnostic failure"):
+            retention.capture([self.python, "-c", _PROBE, "normal", "--retention-diagnostic"], cwd=self.root, env=self.env,
+                              output=self.root / "before-ack-failure", validate_sample=self.validate_sample,
+                              before_ack=fail_before_ack)
+        lifecycle_path, = (self.root / "before-ack-failure").glob("worker-*/lifecycle.json")
+        lifecycle = json.loads(lifecycle_path.read_bytes())
+        self.assertTrue(lifecycle["groupClosed"] and lifecycle["rawFdsClosed"])
+        self.assertIn("diagnostic failure", str(lifecycle["failure"]))
+        metrics = self.root / "before-ack-failure" / "memory.jsonl"
+        records = [json.loads(line) for line in metrics.read_bytes().splitlines()]
+        self.assertEqual([record["cycle"] for record in records], [0])
+
+    def test_before_ack_rejects_formal_retention_capture(self) -> None:
+        def observe_before_ack(barrier: retention.RetentionBarrier, deadline: float) -> None:
+            del barrier, deadline
+
+        with self.assertRaisesRegex(ValueError, "requires retention diagnostic mode"):
+            retention.capture([self.python, "-c", _PROBE, "normal"], cwd=self.root, env=self.env,
+                              output=self.root / "before-ack-formal", validate_sample=self.validate_sample,
+                              before_ack=observe_before_ack)
+        self.assertFalse((self.root / "before-ack-formal").exists())
+
     def test_diagnostic_rejects_missing_and_extra_cycles(self) -> None:
         for mode in ("missing", "extra"):
             with self.subTest(mode=mode), self.assertRaises(ValueError):

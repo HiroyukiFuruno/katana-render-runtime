@@ -28,9 +28,20 @@ class RetentionCapture(NamedTuple):
     runtime_execution: gate.JsonObject
 
 
+class RetentionBarrier(NamedTuple):
+    """Worker identity fixed after READY and before its ACK."""
+
+    cycle: int
+    pid: int
+    create_time: float
+
+
+BeforeAck = Callable[[RetentionBarrier, float], None]
+
+
 class _Interaction:
     def __init__(self, metrics: Path, validate_sample: Callable[[int, bytes], None],
-                 total_cycles: int = TOTAL_CYCLES) -> None:
+                 total_cycles: int = TOTAL_CYCLES, before_ack: BeforeAck | None = None) -> None:
         gate.require(total_cycles in (TOTAL_CYCLES, WARMUP_CYCLES + DIAGNOSTIC_MEASUREMENT_CYCLES),
                      "retention cycle count differs")
         self.metrics = metrics
@@ -40,6 +51,7 @@ class _Interaction:
         self.cycle = 0
         self.waiting_ready = False
         self.process_start: float | None = None
+        self.before_ack = before_ack
 
     def __call__(self, process: subprocess.Popen[bytes], path: Path, deadline: float) -> None:
         with path.open("rb") as stream:
@@ -84,6 +96,11 @@ class _Interaction:
             self.process_start = started
         gate.require(started == self.process_start and observed.is_running(),
                      "retention worker identity differs")
+        if self.before_ack is not None:
+            self.before_ack(RetentionBarrier(self.cycle, process.pid, started), deadline)
+            gate.require(time.monotonic() < deadline and process.poll() is None
+                         and psutil.Process(process.pid).create_time() == started,
+                         "retention worker changed during before-ACK observation")
         memory = observed.memory_info()
         gate.require(time.monotonic() < deadline and process.poll() is None
                      and psutil.Process(process.pid).create_time() == started,
@@ -104,7 +121,8 @@ class _Interaction:
 
 
 def capture(argv: Sequence[str], *, cwd: Path, env: Mapping[str, str], output: Path,
-            validate_sample: Callable[[int, bytes], None]) -> RetentionCapture:
+            validate_sample: Callable[[int, bytes], None], before_ack: BeforeAck | None = None,
+            ) -> RetentionCapture:
     """Collect candidate retention observations under the established worker owner."""
     gate.require(psutil.__version__ == host_load.VERSION == "7.2.2", "retention psutil version differs")
     gate.require(bool(argv) and all(isinstance(item, str) and item for item in argv),
@@ -113,6 +131,8 @@ def capture(argv: Sequence[str], *, cwd: Path, env: Mapping[str, str], output: P
     gate.require(args.count("--retention-diagnostic") <= 1
                  and not ("--retention-diagnostic" in args and "--retention" in args),
                  "retention mode differs")
+    gate.require(before_ack is None or "--retention-diagnostic" in args,
+                 "before-ACK observation requires retention diagnostic mode")
     total_cycles = (WARMUP_CYCLES + DIAGNOSTIC_MEASUREMENT_CYCLES
                     if "--retention-diagnostic" in args else TOTAL_CYCLES)
     output.mkdir(mode=0o700, parents=False, exist_ok=False)
@@ -122,7 +142,7 @@ def capture(argv: Sequence[str], *, cwd: Path, env: Mapping[str, str], output: P
     metrics = output / "memory.jsonl"
     with metrics.open("xb"):
         pass
-    interaction = _Interaction(metrics, validate_sample, total_cycles)
+    interaction = _Interaction(metrics, validate_sample, total_cycles, before_ack)
     lifecycle: list[Path] = []
     runtime: list[gate.JsonObject] = []
     result = producer._measurement_command(args, role="worker", log_directory=output,
