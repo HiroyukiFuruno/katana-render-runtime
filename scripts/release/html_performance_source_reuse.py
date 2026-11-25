@@ -122,10 +122,13 @@ ISSUE_126_PROGRAM_CHANGES: dict[str, tuple[tuple[str, int] | None, tuple[str, in
         "ced0c6455901cbe9429727f9972992a556f9bc847b2c0754ae97cc344b8f351a", 79438)),
     "scripts/release/verify_html_performance_evidence.py": ((
         "530b60bd3dd00984bb3f059e635089f84fd93db6e6ddcc43cfc7864996ee5974", 284543), (
-        "893d0f2c4566df82f9379de2515230a7d3d873f6f87c94e1cf3ade203e917bab", 288969)),
+        "14475fa6148048a6393d7b7ff1073b1347a46383a85e36c9e5131f22c69dabfe", 291435)),
     "scripts/release/verify_html_performance_evidence_test.py": ((
         "0d483f5bf748b82374772e8e2d1b9f658a59371a8dd98d359f4c24ad05453cae", 318403), (
-        "a854c8a2bd27b776af77eb34f21ff6344f088195e68ebd0f7f292bfab2734f86", 324418)),
+        "b80c2fd7f2dc8e0e8805bd14eb997147516c905d8e96f72c2a8591ff11e955f2", 327933)),
+    "scripts/release/html_performance_reuse_entry_test.py": ((
+        "16ccbd1ee1016d83762cf02b48c6f56bf630a62c2f839e9858b6d77bd73c6896", 10273), (
+        "568bd06aa1903267bfe27938004ce56a0a50dfba655da431346f20ac855ad2f1", 13816)),
 }
 ISSUE_126_NONPROGRAM_CHANGES: dict[str, tuple[tuple[str, int] | None, tuple[str, int]]] = {
     "crates/katana-render-runtime/examples/html_open_memory_probe.rs": (None, (
@@ -1073,7 +1076,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "3f200f073578c15c40cf69ccb2bc93c90743a28fc7418e3baba15f9fc6ad5a1c"
+SELF_MODULE_CANONICAL_SHA256 = "6d3ae0fca6ac1c33a4331957e0cfcf78db8bd2c3f2e75f9f03366f2885fc2eac"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":

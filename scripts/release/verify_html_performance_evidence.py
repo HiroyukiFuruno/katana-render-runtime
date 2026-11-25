@@ -1820,12 +1820,30 @@ def _current_build_kwargs(current: PartialEpochCurrentBuild | None) -> CurrentBu
     return {"current_build": current} if current is not None else {}
 
 
-def _verified_partial_epoch_source(
+def _verified_issue_126_legacy_source(
     old_bundle: Bundle, root: Path, old_expected: JsonObject, current: PartialEpochCurrentBuild,
     *, git_query: GitQuery | None = None,
 ) -> object:
+    """Authenticate the legacy candidate's recorded source without inventing sourcePair."""
+    arms = _object(old_expected.get("arms"), "Issue 126 legacy arms")
+    candidate = _object(arms.get("candidate"), "Issue 126 legacy candidate arm")
+    proof = old_bundle.json(candidate.get("build_artifact_ref"))
+    source_before = old_bundle.json(_object(proof.get("sourceBeforeRef"),
+                                            "Issue 126 legacy source-before reference"))
+    return _verified_partial_epoch_source(
+        old_bundle, root, old_expected, current, git_query=git_query,
+        allow_issue_126_program_reuse=True, source_before=source_before,
+    )
+
+def _verified_partial_epoch_source(
+    old_bundle: Bundle, root: Path, old_expected: JsonObject, current: PartialEpochCurrentBuild,
+    *, git_query: GitQuery | None = None, allow_issue_126_program_reuse: bool = False,
+    source_before: JsonObject | None = None,
+) -> object:
     """Authenticate source/build identity only; this does not establish runtime eligibility."""
-    from html_performance_source_reuse import SourceReuseContext, _modes, equivalent_program_records
+    from html_performance_source_reuse import (
+        ISSUE_126_MEASURED_HEAD, SourceReuseContext, _modes, equivalent_program_records,
+    )
 
     digest(current.manifest_sha256)
     digest(current.artifact_sha256)
@@ -1835,9 +1853,13 @@ def _verified_partial_epoch_source(
     current_head = git(root, "rev-parse", "HEAD", git_query=git_query).strip()
     require(current_bundle.manifest.get("head") == current_head,
             "partial epoch current build HEAD differs")
-    old_pair = _object(old_expected.get("sourcePair"), "old source pair")
-    old_before = old_bundle.json(old_pair["before"])
+    old_before = source_before
+    if old_before is None:
+        old_pair = _object(old_expected.get("sourcePair"), "old source pair")
+        old_before = old_bundle.json(old_pair["before"])
     old_head = _text(old_before.get("head"), "partial epoch source HEAD")
+    if allow_issue_126_program_reuse:
+        require(old_head == ISSUE_126_MEASURED_HEAD, "Issue 126 legacy measured HEAD differs")
     require(old_bundle.manifest.get("head") == old_head, "partial epoch bundle HEAD differs")
     require(git(root, "merge-base", old_head, current_head, git_query=git_query).strip() == old_head,
             "partial epoch source is not an ancestor")
@@ -1848,8 +1870,9 @@ def _verified_partial_epoch_source(
     def program_closure(records: SourceRecords) -> SourceRecords:
         return {path: value for path, value in records.items()
                 if path.startswith("scripts/") or path == "Justfile"}
-    require(equivalent_program_records(program_closure(old_records), program_closure(current_records)),
-            "partial epoch measurement program source differs")
+    if not allow_issue_126_program_reuse:
+        require(equivalent_program_records(program_closure(old_records), program_closure(current_records)),
+                "partial epoch measurement program source differs")
     old_tree = _git_output(root, ("ls-tree", "-r", "-z", old_head), git_query=git_query)
     current_tree = _git_output(root, ("ls-tree", "-r", "-z", current_head), git_query=git_query)
     if not isinstance(old_tree, bytes) or not isinstance(current_tree, bytes):
@@ -1887,7 +1910,15 @@ def _verified_partial_epoch_source(
             and git(root, "rev-parse", "HEAD", git_query=git_query).strip() == current_head
             and not git(root, "status", "--porcelain=v1", "--untracked-files=all", git_query=git_query),
             "partial epoch current source changed during validation")
-    return provisional
+    if not allow_issue_126_program_reuse:
+        return provisional
+    current_programs = program_closure(current_records)
+    return _verified_reuse_context(
+        root, old_head, git_query=git_query, allow_test_changes=True,
+        program_records=current_programs,
+        program_modes={path: current_modes[path] for path in current_programs},
+        same_binary_rust=True,
+    )
 
 
 def _validate_epoch_projection_context(context: JsonObject, projection: JsonObject) -> None:
@@ -3947,6 +3978,9 @@ def _verify_impl(directory: Path, root: Path, *, git_query: GitQuery | None = No
     first_pair_value = first_expected.get("sourcePair")
     first_pair = _object(first_pair_value, "source pair") if first_pair_value is not None else {}
     first_is_v3 = first_pair.get("schema") == "krr-html-performance-source-epoch-v3"
+    legacy_issue_126 = (not first_is_v3
+                        and _text(bundle.manifest.get("head"), "measured HEAD")
+                        == "d40d53daf9287f668e0f93ce1c11124658cc234a")
     if remote_context is not None:
         from html_performance_remote_admission import RemoteEvidenceContext
         require(isinstance(remote_context, RemoteEvidenceContext)
@@ -3955,8 +3989,8 @@ def _verify_impl(directory: Path, root: Path, *, git_query: GitQuery | None = No
                 and remote_context.manifest_sha256 == sha256(directory / "bundle.json"),
                 "remote evidence context differs")
     if current_build is not None:
-        require(reuse_context is not None and first_is_v3 and bool(attempts),
-                "current build reuse requires v3 source context")
+        require(reuse_context is not None and (first_is_v3 or legacy_issue_126) and bool(attempts),
+                "current build reuse requires authenticated source context")
     if reuse_context is None:
         require(bundle.manifest["head"] == head, "bundle is not current HEAD")
     else:
@@ -3966,7 +4000,9 @@ def _verify_impl(directory: Path, root: Path, *, git_query: GitQuery | None = No
         checked_context = (_same_binary_v3_reuse_context(
             bundle, root, first_expected, bundle.json(attempts[0]["result"]), current_build,
             git_query=git_query, memory_policy_version=memory_policy_version)
-            if current_build is not None else _verified_v3_reuse_context(
+            if current_build is not None and first_is_v3 else _verified_issue_126_legacy_source(
+            bundle, root, first_expected, current_build, git_query=git_query)
+            if current_build is not None and legacy_issue_126 else _verified_v3_reuse_context(
             bundle, root, reuse_context.measured_head, first_expected, git_query=git_query,
             memory_policy_version=memory_policy_version)
             if first_is_v3 else _verified_reuse_context(
@@ -4288,6 +4324,8 @@ def _verify_source_reuse_impl(directory: Path, root: Path, measured_manifest_sha
     pair_value = first.get("sourcePair")
     pair = _object(pair_value, "source pair") if pair_value is not None else {}
     is_v3 = pair.get("schema") == "krr-html-performance-source-epoch-v3"
+    legacy_issue_126 = (not is_v3
+                        and measured_head == "d40d53daf9287f668e0f93ce1c11124658cc234a")
     current_build = PartialEpochCurrentBuild(build_directory, build_manifest_sha256,
                                              build_artifact_path, build_artifact_sha256)
     def source_context() -> object:
@@ -4296,12 +4334,17 @@ def _verify_source_reuse_impl(directory: Path, root: Path, measured_manifest_sha
             return _same_binary_v3_reuse_context(bundle, root, first, bundle.json(attempts[0]["result"]),
                                                  current_build, git_query=git_query,
                                                  memory_policy_version=memory_policy_version)
+        if legacy_issue_126:
+            require(bool(attempts), "reuse evidence has no attempts")
+            return _verified_issue_126_legacy_source(
+                bundle, root, first, current_build, git_query=git_query,
+            )
         return _verified_reuse_context(root, measured_head, git_query=git_query, allow_test_changes=True,
                                        **_memory_policy_kwargs(memory_policy_version))
     context = source_context()
     measured = _verify(directory, root, git_query=git_query, require_catalog=True,
                        reuse_context=context,
-                       **_current_build_kwargs(current_build if is_v3 else None),
+                       **_current_build_kwargs(current_build if is_v3 or legacy_issue_126 else None),
                        **_memory_policy_kwargs(memory_policy_version))
     _require_formal_release_result(measured)
     if not attempts:
@@ -4329,7 +4372,7 @@ def _verify_source_reuse_impl(directory: Path, root: Path, measured_manifest_sha
     from html_performance_source_reuse import SourceReuseContext
     if not isinstance(context, SourceReuseContext):
         raise ValueError("invalid source reuse context")
-    if context.artifact_equivalence or context.program_equivalence or has_v3:
+    if legacy_issue_126 or context.artifact_equivalence or context.program_equivalence or has_v3:
         for key in ("buildEnvironmentSha256", "toolVersions", "cargoConfigPins",
                     "cargoLauncher", "rustcLauncher", "guardPython"):
             require(old_build[key] == new_build[key], "measured and current build differ: " + key)
@@ -4342,8 +4385,8 @@ def _verify_source_reuse_impl(directory: Path, root: Path, measured_manifest_sha
             "source changed during reuse validation")
     result: JsonObject = {"measuredHead": measured_head, "eligibleHead": eligible_head,
                           "reuseEligibility": True, "measuredResult": measured}
-    if is_v3 or context.artifact_equivalence or context.program_equivalence:
-        result.update({"reuseKind": ("binary-bound-product-source-equivalence-v1" if is_v3 else
+    if is_v3 or legacy_issue_126 or context.artifact_equivalence or context.program_equivalence:
+        result.update({"reuseKind": ("binary-bound-product-source-equivalence-v1" if is_v3 or legacy_issue_126 else
                                      "program-source-artifact-equivalence-v1"
                                      if context.program_equivalence else
                                      "test-source-artifact-equivalence-v1"),
