@@ -51,6 +51,110 @@ JsonObject = dict[str, object]
 JsonMutation = Callable[[JsonObject], None]
 
 
+class Issue126ReleaseExceptionIntegrationTest(unittest.TestCase):
+    def test_v7_policy_exception_receives_only_authenticated_inputs(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as temporary:
+            bundle_path = Path(temporary).resolve()
+            (bundle_path / "bundle.json").write_text(json.dumps({
+                "schema": "krr-html-performance-release-bundle-v1",
+                "head": "d40d53daf9287f668e0f93ce1c11124658cc234a",
+                "files": [],
+            }))
+            bundle = gate.Bundle(bundle_path)
+            expected: JsonObject = {"catalogCondition": {
+                "condition_id": "events/expected-state/620x900@1",
+            }}
+            canonical: JsonObject = {"policyPass": False}
+            with (patch("html_performance_release_exception.post_cold_increment_projection",
+                        return_value={"retentionAllowed": True, "phases": {}}) as projection,
+                  patch("html_performance_release_exception.allows_issue_126_initial_rss",
+                        return_value=True) as allowed):
+                self.assertTrue(gate._issue_126_initial_rss_exception(
+                    bundle, repository, expected, [bundle_path / "report.json"], canonical,
+                    [1.0], "html-memory-v7",
+                ))
+            projection.assert_called_once_with([bundle_path / "report.json"], expected, [1.0])
+            self.assertEqual(allowed.call_args.kwargs["release_version"], "0.4.24")
+            self.assertEqual(allowed.call_args.kwargs["candidate_head"], bundle.manifest["head"])
+            self.assertEqual(allowed.call_args.kwargs["bundle_manifest_sha256"],
+                             gate.sha256(bundle_path / "bundle.json"))
+            self.assertIs(allowed.call_args.kwargs["canonical_policy"], canonical)
+            with patch("html_performance_release_exception.allows_issue_126_initial_rss") as rejected:
+                self.assertFalse(gate._issue_126_initial_rss_exception(
+                    bundle, repository, expected, [], canonical, [], "html-memory-v6",
+                ))
+            rejected.assert_not_called()
+
+    def test_exception_is_disclosed_and_false_does_not_weaken_v7(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as temporary:
+            bundle_path = Path(temporary).resolve()
+            (bundle_path / "bundle.json").write_text(json.dumps({
+                "schema": "krr-html-performance-release-bundle-v1",
+                "head": "d40d53daf9287f668e0f93ce1c11124658cc234a",
+                "files": [],
+            }))
+            bundle = gate.Bundle(bundle_path)
+            expected: JsonObject = {
+                "catalogCondition": {"condition_id": "events/expected-state/620x900@1"},
+                "memoryRetentionRef": {"sha256": "a" * 64},
+            }
+            canonical: JsonObject = {"version": "html-memory-v7", "policyPass": False}
+            sink: list[JsonObject] = []
+            with (patch.object(memory_evidence, "evaluate_paired", return_value=canonical),
+                  patch("html_performance_retention_evidence.read_retained_rss", return_value=[1.0]),
+                  patch.object(gate, "_issue_126_initial_rss_exception", return_value=True)):
+                self.assertTrue(gate._require_v2_memory_policy(
+                    bundle, expected, {"memoryPolicy": canonical}, [bundle_path / "report.json"],
+                    non_comparable=False, root=repository, policy_version="html-memory-v7",
+                    exception_sink=sink,
+                ))
+            self.assertEqual(sink[0]["issue"], 126)
+            self.assertEqual(sink[0]["conditionId"], "events/expected-state/620x900@1")
+            self.assertFalse(sink[0]["originalPolicyPass"])
+            self.assertEqual(sink[0]["phase"], "cold_open")
+            with (patch.object(memory_evidence, "evaluate_paired", return_value=canonical),
+                  patch("html_performance_retention_evidence.read_retained_rss", return_value=[1.0]),
+                  patch.object(gate, "_issue_126_initial_rss_exception", return_value=False),
+                  self.assertRaisesRegex(ValueError, "paired time/memory regression")):
+                gate._require_v2_memory_policy(
+                    bundle, expected, {"memoryPolicy": canonical}, [], non_comparable=False,
+                    root=repository, policy_version="html-memory-v7",
+                )
+
+    def test_formal_consumer_separates_strict_and_exception_acceptance(self) -> None:
+        stage: JsonObject = {"acceptance": True, "fontIdentityEquivalence": "established"}
+        gate._require_formal_release_result({
+            "htmlStage90": stage, "performanceNonregression": True,
+        })
+        rows = [
+            {"issue": 126, "originalPolicyPass": False, "phase": "cold_open", "conditionId": condition}
+            for condition in (
+                "events/expected-state/620x900@1",
+                "events/expected-state/960x720@1",
+                "input-state/focus-visible/960x720@1",
+            )
+        ]
+        gate._require_formal_release_result({
+            "htmlStage90": stage, "performanceNonregression": False,
+            "releaseAcceptance": {
+                "kind": "issue-126-initial-rss-exception-v1", "memoryPolicyExceptions": rows,
+            },
+        })
+        with self.assertRaisesRegex(ValueError, "non-regression"):
+            gate._require_formal_release_result({
+                "htmlStage90": stage, "performanceNonregression": False,
+            })
+        with self.assertRaisesRegex(ValueError, "strict non-regression"):
+            gate._require_formal_release_result({
+                "htmlStage90": stage, "performanceNonregression": True,
+                "releaseAcceptance": {
+                    "kind": "issue-126-initial-rss-exception-v1", "memoryPolicyExceptions": rows,
+                },
+            })
+
+
 class RetentionReaderModule(ModuleType):
     read_retained_rss: Mock
 

@@ -3268,11 +3268,42 @@ def evaluate_measurement_policy(
 
 
 
+def _issue_126_initial_rss_exception(
+    bundle: Bundle, root: Path, expected: JsonObject, paths: list[Path],
+    canonical: JsonObject, retained: list[float], requested: str,
+) -> bool:
+    """認証済みv7評価のうち、固定releaseの初回RSSだけをpolicyへ委譲する。"""
+    if requested != "html-memory-v7":
+        return False
+    manifest_sha256 = sha256(bundle.directory / "bundle.json")
+    try:
+        cargo = (root / "Cargo.toml").read_text(encoding="utf8")
+    except OSError:
+        return False
+    versions = re.findall(r'^\[workspace\.package\]\nversion = "([0-9]+\.[0-9]+\.[0-9]+)"$',
+                          cargo, flags=re.MULTILINE)
+    if len(versions) != 1:
+        return False
+    from html_performance_release_exception import (ISSUE_NUMBER, allows_issue_126_initial_rss,
+                                                    post_cold_increment_projection)
+    condition = _object(expected.get("catalogCondition"), "memory catalog condition")
+    return allows_issue_126_initial_rss(
+        release_version=versions[0], issue_number=ISSUE_NUMBER,
+        candidate_head=_text(bundle.manifest.get("head"), "measured HEAD"),
+        bundle_manifest_sha256=manifest_sha256,
+        condition_id=_text(condition.get("condition_id"), "memory condition ID"),
+        policy_version=requested, canonical_policy=canonical,
+        projection=post_cold_increment_projection(paths, expected, retained),
+    )
+
+
 def _require_v2_memory_policy(
     bundle: Bundle, expected: JsonObject, result: JsonObject,
     paths: list[Path], *, non_comparable: bool,
+    root: Path | None = None,
     policy_version: str | None = None,
     assessment_sink: list[JsonObject] | None = None,
+    exception_sink: list[JsonObject] | None = None,
     policy_sink: list[JsonObject] | None = None,
     allow_rejected: bool = False,
 ) -> bool:
@@ -3299,6 +3330,23 @@ def _require_v2_memory_policy(
         policy_sink.append(canonical)
     accepted = (canonical.get("candidateRetentionPass") is True if non_comparable
                 else canonical.get("policyPass") is True)
+    exception_applied = False
+    if not accepted and not non_comparable and root is not None:
+        exception_applied = _issue_126_initial_rss_exception(
+            bundle, root, expected, paths, canonical, retained, requested,
+        )
+        accepted = exception_applied
+    if exception_applied and exception_sink is not None:
+        catalog = _object(expected.get("catalogCondition"), "memory catalog condition")
+        exception_sink.append({
+            "issue": 126,
+            "conditionId": _text(catalog.get("condition_id"), "memory condition id"),
+            "phase": "cold_open",
+            "originalPolicyPass": False,
+            "policySha256": _v3_json_digest(canonical),
+            "retentionSha256": _text(retention_ref.get("sha256"), "retention SHA"),
+            "bundleManifestSha256": sha256(bundle.directory / "bundle.json"),
+        })
     if assessment_sink is not None:
         catalog = _object(expected.get("catalogCondition"), "memory catalog condition")
         retention_sha = _text(retention_ref.get("sha256"), "retention SHA")
@@ -3382,6 +3430,7 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
                      shared_source: SharedCurrentSource | None = None,
                      memory_policy_version: str | None = None,
                      memory_assessment_sink: list[JsonObject] | None = None,
+                     memory_exception_sink: list[JsonObject] | None = None,
                      memory_acceptance_sink: list[bool] | None = None,
                      allow_memory_rejected: bool = False) -> JsonObject:
     expected = bundle.json(attempt["expected"])
@@ -3680,7 +3729,9 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
                 "saved non-comparable candidate policy differs")
         memory_accepted = _require_v2_memory_policy(
             bundle, expected, result, paths, non_comparable=True,
+            root=root,
             policy_version=memory_policy_version, assessment_sink=memory_assessment_sink,
+            exception_sink=memory_exception_sink,
             allow_rejected=allow_memory_rejected,
         )
         if memory_acceptance_sink is not None:
@@ -3697,7 +3748,9 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
     require(saved == canonical_policy, "saved paired policy differs from raw reports")
     memory_accepted = _require_v2_memory_policy(
         bundle, expected, result, paths, non_comparable=False,
+        root=root,
         policy_version=memory_policy_version, assessment_sink=memory_assessment_sink,
+        exception_sink=memory_exception_sink,
         allow_rejected=allow_memory_rejected,
     )
     if memory_acceptance_sink is not None:
@@ -3744,7 +3797,30 @@ def _require_html84_acceptance(validation: JsonObject, *, diagnostic: bool = Fal
 def _require_formal_release_result(result: JsonObject) -> None:
     stage90 = _object(result.get("htmlStage90"), "HTML84 stage90 result")
     _require_html84_acceptance(stage90)
-    require(result.get("performanceNonregression") is True,
+    if result.get("performanceNonregression") is True:
+        require("releaseAcceptance" not in result,
+                "strict non-regression cannot carry a release exception")
+        return
+    raw_acceptance = result.get("releaseAcceptance")
+    try:
+        acceptance = _object(raw_acceptance, "release exception acceptance")
+    except ValueError as error:
+        raise ValueError("HTML performance non-regression is not established") from error
+    exceptions = _array(acceptance.get("memoryPolicyExceptions"), "release exception conditions")
+    exception_rows: list[JsonObject] = [_object(row, "release exception condition") for row in exceptions]
+    condition_ids = {
+        "events/expected-state/620x900@1",
+        "events/expected-state/960x720@1",
+        "input-state/focus-visible/960x720@1",
+    }
+    require(acceptance.get("kind") == "issue-126-initial-rss-exception-v1"
+            and result.get("performanceNonregression") is False
+            and len(exceptions) == 3
+            and {row.get("conditionId") for row in exception_rows} == condition_ids
+            and all(row.get("issue") == 126
+                    and row.get("originalPolicyPass") is False
+                    and row.get("phase") == "cold_open"
+                    for row in exception_rows),
             "HTML performance non-regression is not established")
 
 
@@ -3940,21 +4016,26 @@ def _verify_impl(directory: Path, root: Path, *, git_query: GitQuery | None = No
                                                 current_source(root, shared_before, git_query=git_query),
                                                 Path(_text(shared_before.get("root"), "source root")))
         assessments: list[JsonObject] | None = [] if memory_policy_version is not None else None
+        exceptions: list[JsonObject] | None = [] if memory_policy_version is not None else None
         if remote_context is None:
             values = [validate_attempt(bundle, root, attempt, git_query=git_query,
                                        validated_builds=None if is_v3 else validated_builds,
                                        reuse_context=reuse_context,
                                        shared_source=None if is_v3 else shared_source,
                                        memory_policy_version=memory_policy_version,
-                                       memory_assessment_sink=assessments)
+                                       memory_assessment_sink=assessments,
+                                       memory_exception_sink=exceptions)
                       for attempt, is_v3 in zip(attempts, v3_rows, strict=True)]
         else:
             values = [validate_attempt(bundle, root, attempt, git_query=git_query,
                                        validated_builds=validated_builds, reuse_context=reuse_context,
                                        remote_context=remote_context,
                                        memory_policy_version=memory_policy_version,
-                                       memory_assessment_sink=assessments) for attempt in attempts]
+                                       memory_assessment_sink=assessments,
+                                       memory_exception_sink=exceptions) for attempt in attempts]
         memory_summary = _catalog_memory_summary(bundle, attempts, assessments=assessments)
+        if exceptions:
+            memory_summary["memoryPolicyExceptions"] = exceptions
         from html_performance_host_load_validation import verify_catalog_host_load
         verify_catalog_host_load(bundle, attempts, _host_load_source_records(
             bundle, root, first_expected, head, git_query=git_query,
@@ -4138,7 +4219,7 @@ def _verify_impl(directory: Path, root: Path, *, git_query: GitQuery | None = No
         if shared_source is not None and shared_before is not None:
             require(current_source(root, shared_before, git_query=git_query) == shared_source.records,
                     "source changed during catalog verification")
-        return {"head": head, "checks": 1680,
+        result: JsonObject = {"head": head, "checks": 1680,
                 "phaseRecords": phase_records, "sampleRecords": sample_records,
                 "candidateSamples": candidate_samples,
                 "conditions": 84, "candidateConditions": 84,
@@ -4147,7 +4228,13 @@ def _verify_impl(directory: Path, root: Path, *, git_query: GitQuery | None = No
                 "htmlStage90": {"threshold": 90, "minimumScore": minimum_score,
                                 "acceptance": validation["acceptance"],
                                 "fontIdentityEquivalence": validation["fontIdentityEquivalence"]},
-                "performanceNonregression": True, **memory_summary}
+                "performanceNonregression": not bool(exceptions), **memory_summary}
+        if exceptions:
+            result["releaseAcceptance"] = {
+                "kind": "issue-126-initial-rss-exception-v1",
+                "memoryPolicyExceptions": exceptions,
+            }
+        return result
     require(len(attempts) == 3, "all three viewports required")
     values = [validate_attempt(bundle, root, attempt, git_query=git_query) for attempt in attempts]
     require([v["viewport"] for v in values] == [{"width": w, "height": h, "scale": 1} for w, h in VIEWPORTS], "viewport coverage/order differs")

@@ -49,6 +49,76 @@ class ZeroScrollPolicyTransitionTest(unittest.TestCase):
 
 
 class SourceReuseTest(unittest.TestCase):
+    def test_issue_126_cohort_pins_d40_git_and_current_source_bytes(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        head = reuse.ISSUE_126_MEASURED_HEAD
+        for path, (old, new) in reuse.ISSUE_126_PROGRAM_CHANGES.items():
+            with self.subTest(path=path):
+                current = (root / path).read_bytes()
+                self.assertEqual((root / path).stat().st_mode & 0o777, 0o644)
+                if old is None:
+                    self.assertNotEqual(subprocess.run(
+                        ["git", "-C", str(root), "cat-file", "-e", head + ":" + path],
+                        capture_output=True,
+                    ).returncode, 0)
+                else:
+                    previous = subprocess.check_output(["git", "-C", str(root), "show", head + ":" + path])
+                    self.assertEqual((hashlib.sha256(previous).hexdigest(), len(previous)), old)
+                if new is None:
+                    self.assertTrue(reuse.reviewed_same_binary_self(current))
+                else:
+                    self.assertEqual((hashlib.sha256(current).hexdigest(), len(current)), new)
+
+    def test_issue_126_program_reuse_cohort_is_exact_and_same_binary_only(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        paths = set(reuse.ISSUE_126_PROGRAM_CHANGES)
+        self_path = reuse.ZERO_SCROLL_SELF
+        self_record = (hashlib.sha256((root / self_path).read_bytes()).hexdigest(),
+                       (root / self_path).stat().st_size)
+        measured: reuse.Records = {}
+        current: reuse.Records = {}
+        for path, (old, new) in reuse.ISSUE_126_PROGRAM_CHANGES.items():
+            if old is not None:
+                measured[path] = old
+            if path == self_path:
+                current[path] = self_record
+            else:
+                assert new is not None
+                current[path] = new
+        old_modes = dict.fromkeys(measured, "100644")
+        new_modes = dict.fromkeys(paths, "100644")
+
+        def approved(candidate: reuse.Records = current, previous_modes: dict[str, str] = old_modes,
+                     candidate_modes: dict[str, str] = new_modes, *, same_binary: bool = True,
+                     head: str = reuse.ISSUE_126_MEASURED_HEAD) -> bool:
+            return reuse._issue_126_program_reuse_cohort(
+                root, head, candidate, measured, previous_modes, candidate_modes,
+                measured, old_modes, same_binary,
+            )
+
+        self.assertTrue(approved())
+        with tempfile.TemporaryDirectory() as temporary:
+            isolated = Path(temporary).resolve()
+            source = isolated / self_path
+            source.parent.mkdir(parents=True)
+            source.write_bytes((root / self_path).read_bytes() + b"\n# unreviewed self mutation\n")
+            mutated = dict(current)
+            mutated[self_path] = (hashlib.sha256(source.read_bytes()).hexdigest(), source.stat().st_size)
+            self.assertFalse(reuse._issue_126_program_reuse_cohort(
+                isolated, reuse.ISSUE_126_MEASURED_HEAD, mutated, measured, old_modes, new_modes,
+                measured, old_modes, True,
+            ))
+        for path in paths - {self_path}:
+            with self.subTest(path=path):
+                invalid = dict(current)
+                invalid[path] = ("f" * 64, current[path][1])
+                self.assertFalse(approved(invalid))
+        self.assertFalse(approved(same_binary=False))
+        self.assertFalse(approved(head="0" * 40))
+        self.assertFalse(approved(current, old_modes, {**new_modes, self_path: "100755"}))
+        self.assertFalse(approved({**current, "scripts/release/unrelated.py": ("f" * 64, 1)}, old_modes,
+                                  {**new_modes, "scripts/release/unrelated.py": "100644"}))
+
     def test_release_manifest_pin_normalization_requires_unique_exact_declarations(self) -> None:
         manifest = b'REQUIRED_RELEASE_MANIFEST_SHA256 = "' + b"a" * 64 + b'"\n'
         snapshot = b'RELEASE_VALIDATION_SNAPSHOT = "' + b"b" * 40 + b'"\n'

@@ -85,6 +85,85 @@ ZERO_SCROLL_REVIEWED_FILES: dict[str, tuple[str, int]] = {
 }
 ZERO_SCROLL_SELF = "scripts/release/html_performance_source_reuse.py"
 
+# WHY: Issue #126 の既測定bundleはd40の実workerへ束縛されている。計測経路を
+# 変更していない診断・検査追加だけを、blobとmodeが全て一致する一回限りの集合として扱う。
+ISSUE_126_MEASURED_HEAD = "d40d53daf9287f668e0f93ce1c11124658cc234a"
+ISSUE_126_PROGRAM_CHANGES: dict[str, tuple[tuple[str, int] | None, tuple[str, int] | None]] = {
+    "scripts/release/html_open_memory_diagnostic.py": (None, (
+        "e23a08e62bb95aa973aa32d8633c7282c58a7a9d5b3d2744b955ce8aa5d76ec7", 7420)),
+    "scripts/release/html_open_memory_diagnostic_test.py": (None, (
+        "6fd678931d7d4bf26682e84905d2754d311bfa3a3a3bd42db0a66200084f9aad", 4961)),
+    "scripts/release/html_performance_release_exception.py": (None, (
+        "7d5d77c6c7e88255e1a2b0df059e21426f85370ca69f3f273d61b55f365e1fab", 5951)),
+    "scripts/release/html_performance_release_exception_test.py": (None, (
+        "7d4b408904a1b3ae0a66ec7687edd61fade111418c43f9e144efaeddc110a492", 7915)),
+    "scripts/release/html_performance_promotion_test.py": ((
+        "fc16d21b35d6a49b8697662f44323c86307f067c4a239ebfd708fd813b2c7218", 37514), (
+        "2f02776adc6766a47cbe3e9b82e61911d729a6f691bebe9e71ec365ae086054e", 38929)),
+    "scripts/release/html_performance_retention_capture.py": ((
+        "488be050774f684fba45ab0c2693b4f04741a518cd444dc701dc9e48123077f9", 6528), (
+        "6cf9f2af0dcca2e6dfdef215fc16ead506eacd76eb42d2310bda32ec8ed55a6c", 7402)),
+    "scripts/release/html_performance_retention_capture_test.py": ((
+        "3ddc715a8f04b8db42a7ca2fc4b891c64a3c8805c074b754984c69ca9901e1cd", 5798), (
+        "57ef5cfb0a76798c6bb7f4d9c52d7d3aaa65da153589801c25ae34bc1a49a65a", 8653)),
+    "scripts/release/html_performance_retention_collection_test.py": ((
+        "75ab89e17d580b65ce8d4805415b6ff1f67247ee896b053a19a5ad3388d500f6", 7458), (
+        "464289dd1aab46f50b57378a4e458f99eff15dc15b81f7ddb5dbee4f18e75b4a", 7532)),
+    "scripts/release/html_performance_same_binary_diagnostic.py": ((
+        "0f6a3ce678431eeb59bc021b390c5e71b0fb3005a5e33538fccc92b3706c6a12", 10533), (
+        "f53bed85c732e0fd7d9130f2a122c1f3f8ffb7106255545b3bc44db8de966df8", 12034)),
+    "scripts/release/html_performance_same_binary_diagnostic_test.py": ((
+        "5cbeccc03f1b5093ad5c0ac992e17203071d9bd831b98decea602b95188bef01", 1722), (
+        "7a2d6c6c2bc313f6eb6aaab1db178195ae4791af3ca90b20137eeedd82ab0773", 3906)),
+    "scripts/release/html_performance_source_reuse.py": ((
+        "e16ac40725f78279f6166edca6ace6d49209dc6cfa3f0856cd4b7938e624dbab", 118370), None),
+    "scripts/release/html_performance_source_reuse_test.py": ((
+        "eecbf9ed1571279b9ed7b3d1cb256a5df3f9a53b7c1ee362b2794ebc6ed360c3", 73390), (
+        "47e758a92acf4bea8b4fecb3b24a74c5f4ea24194fa426dbcd242599775b2646", 77196)),
+    "scripts/release/verify_html_performance_evidence.py": ((
+        "530b60bd3dd00984bb3f059e635089f84fd93db6e6ddcc43cfc7864996ee5974", 284543), (
+        "893d0f2c4566df82f9379de2515230a7d3d873f6f87c94e1cf3ade203e917bab", 288969)),
+    "scripts/release/verify_html_performance_evidence_test.py": ((
+        "0d483f5bf748b82374772e8e2d1b9f658a59371a8dd98d359f4c24ad05453cae", 318403), (
+        "a854c8a2bd27b776af77eb34f21ff6344f088195e68ebd0f7f292bfab2734f86", 324418)),
+}
+
+
+def _issue_126_program_reuse_cohort(
+    root: Path, measured_head: str, current: Records, measured: Records,
+    old_modes: Mapping[str, str], new_modes: Mapping[str, str],
+    program_records: Mapping[str, tuple[str, int]], program_modes: Mapping[str, str],
+    same_binary_rust: bool,
+) -> bool:
+    """Issue #126 の同一worker再利用に必要なprogram差分だけを認証する。"""
+    if not same_binary_rust or measured_head != ISSUE_126_MEASURED_HEAD:
+        return False
+    programs = {path for path in set(measured) | set(current)
+                if path.startswith("scripts/") or path == "Justfile"}
+    measured_programs = {path for path in measured if path.startswith("scripts/") or path == "Justfile"}
+    if (set(program_records) != measured_programs or set(program_modes) != measured_programs
+            or any(program_records.get(path) != measured.get(path)
+                   or program_modes.get(path) != old_modes.get(path) for path in measured_programs)):
+        return False
+    changed = {path for path in programs
+               if measured.get(path) != current.get(path) or old_modes.get(path) != new_modes.get(path)}
+    if changed != set(ISSUE_126_PROGRAM_CHANGES):
+        return False
+    self_path = ZERO_SCROLL_SELF
+    self_source = (root / self_path).read_bytes()
+    self_record = (hashlib.sha256(self_source).hexdigest(), len(self_source))
+    for path, (old, new) in ISSUE_126_PROGRAM_CHANGES.items():
+        if old_modes.get(path) != "100644" or new_modes.get(path) != "100644":
+            if old is not None or old_modes.get(path) is not None or new_modes.get(path) != "100644":
+                return False
+        if path == self_path:
+            if (measured.get(path) != old or measured.get(path) != program_records.get(path)
+                    or current.get(path) != self_record or not reviewed_same_binary_self(self_source)):
+                return False
+        elif measured.get(path) != old or current.get(path) != new:
+            return False
+    return True
+
 
 def is_zero_scroll_transition_program(source: bytes) -> bool:
     return (b"ZERO_SCROLL_MEASURED_HEAD" in source
@@ -977,7 +1056,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "49de99d55d104a65b48c9d9565ca87caaafdf6f0c02ad12933f2d7692a9f8a6e"
+SELF_MODULE_CANONICAL_SHA256 = "c12f9eb4c280ef7f37528aaffa6dc35c0f98a106c2dddd5243a0728715e036f7"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":
@@ -1447,7 +1526,10 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
     if program_records is not None and program_modes is not None:
         if (not equivalent_program_records(
                 {path: value for path, value in current.items() if is_program(path)}, program_records)
-                or {path: value for path, value in new_modes.items() if is_program(path)} != program_modes):
+                or {path: value for path, value in new_modes.items() if is_program(path)} != program_modes) and not _issue_126_program_reuse_cohort(
+                    root, measured_head, current, measured, old_modes, new_modes,
+                    program_records, program_modes, same_binary_rust,
+                ):
             raise ValueError("current measurement program differs from authenticated program")
     parse5_cohort = same_binary_rust and _reviewed_parse5_cohort(
         root, measured_head, current, measured, old_modes, new_modes, git_bytes,

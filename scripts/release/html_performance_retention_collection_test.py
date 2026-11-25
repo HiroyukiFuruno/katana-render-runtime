@@ -80,6 +80,7 @@ class RetentionCollectionAdapterTests(unittest.TestCase):
             self.assertEqual(capture_call.call_args.kwargs["env"], {"MODE": "test"})
             self.assertEqual(capture_call.call_args.kwargs["output"], folder / "retention")
             self.assertTrue(callable(capture_call.call_args.kwargs["validate_sample"]))
+            self.assertNotIn("before_ack", capture_call.call_args.kwargs)
             writer.assert_called_once_with(folder / "memory-retention.json", capture=observed,
                                            expected=expected)
             self.assertEqual(result, (reference, transport))
