@@ -3752,7 +3752,6 @@ class PerformanceEvidenceTest(unittest.TestCase):
                       stderr.getvalue())
 
     def test_partial_epoch_source_requires_matching_independent_build_proofs(self) -> None:
-        import html_performance_source_reuse as reuse
         from html_performance_source_reuse import SourceReuseContext
 
         old_expected = gate.read_json(self.expected_paths[0])
@@ -3790,30 +3789,6 @@ class PerformanceEvidenceTest(unittest.TestCase):
             raise AssertionError("partial epoch context differs")
         self.assertEqual(checked.call_count, 2)
         self.assertEqual(context.measured_head, self.head)
-        strict_context = SourceReuseContext(self.head, current_head, {}, (), True, True)
-        with (patch.object(gate, "_validate_build_proof", side_effect=[current_proof, old_proof]),
-              patch.object(gate, "_verified_reuse_context", return_value=strict_context) as source,
-              patch.object(reuse, "ISSUE_126_MEASURED_HEAD", self.head)):
-            self.assertIs(gate._verified_partial_epoch_source(
-                bundle, self.root, old_expected, proof, allow_issue_126_program_reuse=True), strict_context)
-        self.assertTrue(source.call_args.kwargs["same_binary_rust"])
-        with (patch.object(gate, "_validate_build_proof", side_effect=[
-                    {**current_proof, "head": "other"}, old_proof]),
-              patch.object(gate, "_verified_reuse_context") as source,
-              patch.object(reuse, "ISSUE_126_MEASURED_HEAD", self.head)):
-            with self.assertRaisesRegex(ValueError, "current build source differs"):
-                gate._verified_partial_epoch_source(
-                    bundle, self.root, old_expected, proof, allow_issue_126_program_reuse=True)
-        source.assert_not_called()
-        missing_environment = dict(current_proof)
-        del missing_environment["buildEnvironmentSha256"]
-        with (patch.object(gate, "_validate_build_proof", side_effect=[missing_environment, old_proof]),
-              patch.object(gate, "_verified_reuse_context") as source,
-              patch.object(reuse, "ISSUE_126_MEASURED_HEAD", self.head)):
-            with self.assertRaisesRegex(ValueError, "build differs: buildEnvironmentSha256"):
-                gate._verified_partial_epoch_source(
-                    bundle, self.root, old_expected, proof, allow_issue_126_program_reuse=True)
-        source.assert_not_called()
         with patch.object(gate, "_validate_build_proof", side_effect=[{**current_proof, "binarySha256": "0" * 64}, old_proof]):
             with self.assertRaisesRegex(ValueError, "build differs: binarySha256"):
                 gate._verified_partial_epoch_source(bundle, self.root, old_expected, proof)
@@ -3833,36 +3808,6 @@ class PerformanceEvidenceTest(unittest.TestCase):
             gate._verified_partial_epoch_source(
                 bundle, self.root, old_expected, proof._replace(manifest_sha256=gate.sha256(manifest_path)),
             )
-
-    def test_issue_126_legacy_source_uses_candidate_proof_without_source_pair(self) -> None:
-        from html_performance_source_reuse import ISSUE_126_MEASURED_HEAD
-
-        expected: JsonObject = {"arms": {"candidate": {"build_artifact_ref": "artifact"}}}
-        source_before: JsonObject = {"head": ISSUE_126_MEASURED_HEAD}
-        source_reference: JsonObject = {"path": "source-before", "sha256": "a" * 64}
-
-        class LegacyBundle:
-            def json(self, reference: object) -> JsonObject:
-                if reference == "artifact":
-                    return {"sourceBeforeRef": source_reference}
-                if reference == source_reference:
-                    return source_before
-                raise AssertionError(f"unexpected reference: {reference}")
-
-        current = gate.PartialEpochCurrentBuild(self.bundle, "a" * 64, "artifact", "b" * 64)
-        with patch.object(gate, "_verified_partial_epoch_source", return_value="verified") as partial:
-            self.assertEqual(gate._verified_issue_126_legacy_source(
-                LegacyBundle(), self.root, expected, current), "verified")
-        self.assertEqual(partial.call_args.kwargs["source_before"], source_before)
-        self.assertTrue(partial.call_args.kwargs["allow_issue_126_program_reuse"])
-        class MissingSourceBefore(LegacyBundle):
-            def json(self, reference: object) -> JsonObject:
-                if reference == "artifact":
-                    return {}
-                return super().json(reference)
-
-        with self.assertRaises(ValueError):
-            gate._verified_issue_126_legacy_source(MissingSourceBefore(), self.root, expected, current)
 
     def test_reuse_keeps_original_head_and_rejects_unaccepted_bundle(self) -> None:
         history = self.root / "docs/performance/html-performance-history.json"

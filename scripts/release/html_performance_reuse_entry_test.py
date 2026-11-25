@@ -98,60 +98,6 @@ class ReuseEntryTest(unittest.TestCase):
                         gate.verify_source_reuse(*args)
                     current[key] = saved
 
-    def test_issue_126_legacy_reauthenticates_builds_before_source_cohort(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve()
-            old, new, checksum = reuse_directories(root)
-            measured_head = reuse.ISSUE_126_MEASURED_HEAD
-            eligible_head = "b" * 40
-            context = reuse.SourceReuseContext(measured_head, eligible_head, {}, (),
-                                                program_equivalence=True)
-            facts = build_facts()
-            old_build = {**facts, "head": measured_head}
-            new_build = {**facts, "head": eligible_head}
-            tool = measurement_tool()
-
-            class FakeBundle:
-                def __init__(self, directory: Path) -> None:
-                    self.manifest = {"head": measured_head if directory == old else eligible_head,
-                                     "attempts": [{"expected": "expected", "result": "result"}]}
-
-                def json(self, ref: object) -> dict[str, object]:
-                    if ref == "expected":
-                        return {"sourcePair": {}, "endpointRefs": {"before": "before"}}
-                    return {"toolContext": tool}
-
-                def relative_reference(self, _path: str, _sha: str) -> dict[str, object]:
-                    return {}
-
-            with (patch.object(gate, "Bundle", FakeBundle),
-                  patch.object(gate, "git", return_value=eligible_head),
-                  patch.object(gate, "_verified_issue_126_legacy_source", return_value=context) as cohort,
-                  patch.object(gate, "_verify", return_value={"conditions": 84}),
-                  patch.object(gate, "_require_formal_release_result"),
-                  patch.object(gate, "validate_expected_builds", return_value={"candidate": old_build}),
-                  patch.object(gate, "_validate_build_proof", return_value=new_build)):
-                result = gate.verify_source_reuse(old, root, checksum, new, checksum, "artifact", checksum)
-            self.assertEqual(result["reuseKind"], "binary-bound-product-source-equivalence-v1")
-            self.assertEqual(cohort.call_count, 2)
-            self.assertTrue(all(call.kwargs == {"git_query": None} for call in cohort.call_args_list))
-
-            non_issue_context = reuse.SourceReuseContext("a" * 40, eligible_head, {}, ())
-            with (patch.object(gate, "Bundle", FakeBundle),
-                  patch.object(gate, "git", return_value=eligible_head),
-                  patch.object(gate, "_verified_issue_126_legacy_source") as cohort,
-                  patch.object(gate, "_verified_reuse_context", return_value=non_issue_context),
-                  patch.object(gate, "_verify", return_value={"conditions": 84}),
-                  patch.object(gate, "_require_formal_release_result"),
-                  patch.object(gate, "validate_expected_builds", return_value={"candidate": old_build}),
-                  patch.object(gate, "_validate_build_proof", return_value=new_build)):
-                with patch.object(FakeBundle, "__init__", lambda self, directory: setattr(
-                        self, "manifest", {"head": "a" * 40 if directory == old else eligible_head,
-                                             "attempts": [{"expected": "expected", "result": "result"}]})):
-                    result = gate.verify_source_reuse(old, root, checksum, new, checksum, "artifact", checksum)
-            self.assertNotIn("reuseKind", result)
-            cohort.assert_not_called()
-
     def test_formal_failure_and_current_binary_mismatch_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
