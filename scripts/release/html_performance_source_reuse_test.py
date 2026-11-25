@@ -49,10 +49,43 @@ class ZeroScrollPolicyTransitionTest(unittest.TestCase):
 
 
 class SourceReuseTest(unittest.TestCase):
+    def test_issue_126_skips_unrelated_release_tooling_epoch_pairs(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        measured: reuse.Records = {}
+        current: reuse.Records = {}
+        old_modes: dict[str, str] = {}
+        new_modes: dict[str, str] = {}
+        for path, (old, new) in reuse.ISSUE_126_NONPROGRAM_CHANGES.items():
+            if old is not None:
+                measured[path] = old
+                old_modes[path] = "100644"
+            current[path] = new
+            new_modes[path] = "100644"
+        cargo = "crates/katana-render-runtime/Cargo.toml"
+        measured[cargo] = ("0" * 64, 1)
+        current[cargo] = ("f" * 64, 1)
+        old_modes[cargo] = new_modes[cargo] = "100644"
+        def git_bytes(args: Sequence[str]) -> bytes:
+            return subprocess.check_output(["git", "-C", str(root), *args])
+        with self.assertRaisesRegex(ValueError, "release tooling source delta differs"):
+            reuse._specific_source_changes(
+                root, reuse.ISSUE_126_MEASURED_HEAD, current, measured, old_modes, new_modes, git_bytes,
+                allow_test_changes=True, same_binary_rust=True,
+            )
+        approved, additions = reuse._specific_source_changes(
+            root, reuse.ISSUE_126_MEASURED_HEAD, current, measured, old_modes, new_modes, git_bytes,
+            allow_test_changes=True, same_binary_rust=True, allow_issue_126_cohort=True,
+        )
+        self.assertEqual(approved, set(reuse.ISSUE_126_NONPROGRAM_CHANGES))
+        self.assertEqual(additions, {
+            path for path, (old, _) in reuse.ISSUE_126_NONPROGRAM_CHANGES.items() if old is None
+        })
+
     def test_issue_126_cohort_pins_d40_git_and_current_source_bytes(self) -> None:
         root = Path(__file__).resolve().parents[2]
         head = reuse.ISSUE_126_MEASURED_HEAD
-        for path, (old, new) in reuse.ISSUE_126_PROGRAM_CHANGES.items():
+        changes = {**reuse.ISSUE_126_PROGRAM_CHANGES, **reuse.ISSUE_126_NONPROGRAM_CHANGES}
+        for path, (old, new) in changes.items():
             with self.subTest(path=path):
                 current = (root / path).read_bytes()
                 self.assertEqual((root / path).stat().st_mode & 0o777, 0o644)
@@ -97,6 +130,16 @@ class SourceReuseTest(unittest.TestCase):
             )
 
         self.assertTrue(approved())
+        self.assertTrue(reuse._issue_126_program_reuse_cohort(
+            root, reuse.ISSUE_126_MEASURED_HEAD, current, measured, old_modes, new_modes,
+            current, new_modes, True,
+        ))
+        v3_invalid = dict(current)
+        v3_invalid[self_path] = ("f" * 64, current[self_path][1])
+        self.assertFalse(reuse._issue_126_program_reuse_cohort(
+            root, reuse.ISSUE_126_MEASURED_HEAD, current, measured, old_modes, new_modes,
+            v3_invalid, new_modes, True,
+        ))
         with tempfile.TemporaryDirectory() as temporary:
             isolated = Path(temporary).resolve()
             source = isolated / self_path

@@ -119,13 +119,22 @@ ISSUE_126_PROGRAM_CHANGES: dict[str, tuple[tuple[str, int] | None, tuple[str, in
         "e16ac40725f78279f6166edca6ace6d49209dc6cfa3f0856cd4b7938e624dbab", 118370), None),
     "scripts/release/html_performance_source_reuse_test.py": ((
         "eecbf9ed1571279b9ed7b3d1cb256a5df3f9a53b7c1ee362b2794ebc6ed360c3", 73390), (
-        "47e758a92acf4bea8b4fecb3b24a74c5f4ea24194fa426dbcd242599775b2646", 77196)),
+        "ced0c6455901cbe9429727f9972992a556f9bc847b2c0754ae97cc344b8f351a", 79438)),
     "scripts/release/verify_html_performance_evidence.py": ((
         "530b60bd3dd00984bb3f059e635089f84fd93db6e6ddcc43cfc7864996ee5974", 284543), (
         "893d0f2c4566df82f9379de2515230a7d3d873f6f87c94e1cf3ade203e917bab", 288969)),
     "scripts/release/verify_html_performance_evidence_test.py": ((
         "0d483f5bf748b82374772e8e2d1b9f658a59371a8dd98d359f4c24ad05453cae", 318403), (
         "a854c8a2bd27b776af77eb34f21ff6344f088195e68ebd0f7f292bfab2734f86", 324418)),
+}
+ISSUE_126_NONPROGRAM_CHANGES: dict[str, tuple[tuple[str, int] | None, tuple[str, int]]] = {
+    "crates/katana-render-runtime/examples/html_open_memory_probe.rs": (None, (
+        "96f3f57b55c4dc671cb6a7e90923b900ec8266915505cad92a418b9f83d8a218", 7320)),
+    "docs/performance/README.md": ((
+        "a2df2b2f51961df89b4356bf23e76ed9bb16845937e4b61d901591ac7c50fd1b", 13764), (
+        "3abcb48373be891d8c245f20c017dbdc1d1aad2bc8a34530952aaf26936f7045", 14559)),
+    "docs/performance/html-performance-investigation.md": (None, (
+        "15e6d47b3133fc175756ca2729569a62c722a78770c494784adb3ed102aefa4d", 14410)),
 }
 
 
@@ -141,9 +150,16 @@ def _issue_126_program_reuse_cohort(
     programs = {path for path in set(measured) | set(current)
                 if path.startswith("scripts/") or path == "Justfile"}
     measured_programs = {path for path in measured if path.startswith("scripts/") or path == "Justfile"}
-    if (set(program_records) != measured_programs or set(program_modes) != measured_programs
-            or any(program_records.get(path) != measured.get(path)
-                   or program_modes.get(path) != old_modes.get(path) for path in measured_programs)):
+    current_programs = {path for path in current if path.startswith("scripts/") or path == "Justfile"}
+    measured_proof = (set(program_records) == measured_programs and set(program_modes) == measured_programs
+                      and all(program_records.get(path) == measured.get(path)
+                              and program_modes.get(path) == old_modes.get(path)
+                              for path in measured_programs))
+    current_proof = (set(program_records) == current_programs and set(program_modes) == current_programs
+                     and all(program_records.get(path) == current.get(path)
+                             and program_modes.get(path) == new_modes.get(path)
+                             for path in current_programs))
+    if not (measured_proof or current_proof):
         return False
     changed = {path for path in programs
                if measured.get(path) != current.get(path) or old_modes.get(path) != new_modes.get(path)}
@@ -157,7 +173,8 @@ def _issue_126_program_reuse_cohort(
             if old is not None or old_modes.get(path) is not None or new_modes.get(path) != "100644":
                 return False
         if path == self_path:
-            if (measured.get(path) != old or measured.get(path) != program_records.get(path)
+            if (measured.get(path) != old
+                    or program_records.get(path) not in {measured.get(path), current.get(path)}
                     or current.get(path) != self_record or not reviewed_same_binary_self(self_source)):
                 return False
         elif measured.get(path) != old or current.get(path) != new:
@@ -1056,7 +1073,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "c12f9eb4c280ef7f37528aaffa6dc35c0f98a106c2dddd5243a0728715e036f7"
+SELF_MODULE_CANONICAL_SHA256 = "3f200f073578c15c40cf69ccb2bc93c90743a28fc7418e3baba15f9fc6ad5a1c"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":
@@ -1314,6 +1331,7 @@ def _specific_source_changes(
     root: Path, measured_head: str, current: Records, measured: Records,
     old_modes: Mapping[str, str], new_modes: Mapping[str, str], git_bytes: GitBytes,
     *, allow_test_changes: bool, same_binary_rust: bool = False,
+    allow_issue_126_cohort: bool = False,
 ) -> tuple[set[str], set[str]]:
     """今回のHTML test、release文書と補助ツールの厳密な差分だけを認証する。"""
     parent = "crates/katana-render-runtime/src/renderer/backends/html_interactive/session.rs"
@@ -1333,6 +1351,23 @@ def _specific_source_changes(
     ):
         approved.update(FROZEN_RELEASE_CI_CHANGES)
         added_tests.update(path for path, (old, _) in FROZEN_RELEASE_CI_CHANGES.items() if old is None)
+
+    if allow_issue_126_cohort:
+        for path, (old, new) in ISSUE_126_NONPROGRAM_CHANGES.items():
+            if (measured.get(path) != old or current.get(path) != new
+                    or old_modes.get(path) != ("100644" if old is not None else None)
+                    or new_modes.get(path) != "100644"):
+                raise ValueError("issue 126 non-program source delta differs")
+            current_bytes = (root / path).read_bytes()
+            if (hashlib.sha256(current_bytes).hexdigest(), len(current_bytes)) != new:
+                raise ValueError("issue 126 non-program current bytes differ")
+            if old is not None:
+                old_bytes = git_bytes(("show", measured_head + ":" + path))
+                if (hashlib.sha256(old_bytes).hexdigest(), len(old_bytes)) != old:
+                    raise ValueError("issue 126 non-program measured bytes differ")
+            approved.add(path)
+            if old is None:
+                added_tests.add(path)
 
     release_tooling_pairs = {
         "crates/katana-render-runtime/Cargo.toml": (
@@ -1370,7 +1405,8 @@ def _specific_source_changes(
             "c62e9805030bf7f4f94e6af83ee2a62da042e738106208fed6f59ec0ecb0f504",
             "e355b5be38f4dd91a3ab417cabf055165a6d5891ae7cfe3ad4f616630fca4c01",
         )
-    for path, (expected_old, expected_new) in release_tooling_pairs.items():
+    for path, (expected_old, expected_new) in (() if allow_issue_126_cohort
+                                                 else release_tooling_pairs.items()):
         if path in approved:
             continue
         if measured.get(path) == current.get(path):
@@ -1523,13 +1559,15 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
         raise ValueError("program source proof is incomplete")
     def is_program(path: str) -> bool:
         return path.startswith("scripts/") or path == "Justfile"
+    issue_126_cohort = False
     if program_records is not None and program_modes is not None:
+        issue_126_cohort = _issue_126_program_reuse_cohort(
+            root, measured_head, current, measured, old_modes, new_modes,
+            program_records, program_modes, same_binary_rust,
+        )
         if (not equivalent_program_records(
                 {path: value for path, value in current.items() if is_program(path)}, program_records)
-                or {path: value for path, value in new_modes.items() if is_program(path)} != program_modes) and not _issue_126_program_reuse_cohort(
-                    root, measured_head, current, measured, old_modes, new_modes,
-                    program_records, program_modes, same_binary_rust,
-                ):
+                or {path: value for path, value in new_modes.items() if is_program(path)} != program_modes) and not issue_126_cohort:
             raise ValueError("current measurement program differs from authenticated program")
     parse5_cohort = same_binary_rust and _reviewed_parse5_cohort(
         root, measured_head, current, measured, old_modes, new_modes, git_bytes,
@@ -1562,6 +1600,7 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
     approved_changes, new_test_files = _specific_source_changes(
         root, measured_head, current, measured, old_modes, new_modes, git_bytes,
         allow_test_changes=allow_test_changes, same_binary_rust=same_binary_rust,
+        allow_issue_126_cohort=issue_126_cohort,
     )
     reassessment_changes = (_zero_scroll_policy_changes(
         measured_head, current, measured, old_modes, new_modes,
