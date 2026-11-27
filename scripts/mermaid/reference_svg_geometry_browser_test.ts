@@ -992,59 +992,50 @@ test.describe("paint projection evaluates actual candidate pixels", () => {
       expect(String(reason)).toContain("Paint projection cannot map an SVG reference ID");
     }
   });
-  for (const variant of [
-    {
-      label: "candidate",
-      path: () => requirePaintProjectionObservation(observation).fixture.input.candidatePngPath,
-      passes: true,
-    },
-    {
-      label: "missing-label",
-      path: () => requirePaintProjectionObservation(observation).fixture.missingLabelPngPath,
-      passes: false,
-    },
-    {
-      label: "missing-edge",
-      path: () => requirePaintProjectionObservation(observation).fixture.missingEdgePngPath,
-      passes: false,
-    },
-  ] as const) {
-    test(`component scorer forwards frame PNG and preserves paint shape controls: ${variant.label}`, async () => {
-      const currentObservation = requirePaintProjectionObservation(observation);
-      const fixtureRoot = path.dirname(currentObservation.projectedDirectory);
-      const bridgeRoot = path.join(fixtureRoot, variant.label);
-      fs.mkdirSync(bridgeRoot, { recursive: true, mode: 0o700 });
-      const bridge = createNativeShapeBridgeFixture(currentObservation.fixture, variant.path());
-      pendingScore = scoreNativeFramePaintProjection(
-        bridge.pairs,
-        bridge.evidence,
-        bridgeRoot,
-        "dark",
-        new MagickOps(path.join(fixtureRoot, "bridge-magick"), null, "dark"),
-      );
-      const result = await pendingScore;
-      expect(result.scores.size).toBe(NATIVE_FRAME_TARGETS.length);
-      for (const score of result.scores.values()) {
-        if (variant.passes) expect(score.score).toBe(100);
-        else expect(score.score).toBeLessThan(99);
-      }
-    });
-  }
+  test("component scorer forwards frame PNG and preserves paint shape controls", async () => {
+    const currentObservation = requirePaintProjectionObservation(observation);
+    const fixtureRoot = path.dirname(currentObservation.projectedDirectory);
+    const bridgeRoot = path.join(fixtureRoot, "native-shape-bridge");
+    fs.mkdirSync(bridgeRoot, { recursive: true, mode: 0o700 });
+    const bridge = createNativeShapeBridgeFixture(currentObservation.fixture);
+    pendingScore = scoreNativeFramePaintProjection(
+      bridge.pairs,
+      bridge.evidence,
+      bridgeRoot,
+      "dark",
+      new MagickOps(path.join(fixtureRoot, "bridge-magick"), null, "dark"),
+    );
+    const result = await pendingScore;
+    expect([...result.scores.keys()]).toEqual([...NATIVE_FRAME_TARGETS]);
+    for (const [slug, score] of result.scores) {
+      if (bridge.alteredPngs.has(slug)) expect(score.score, slug).toBeLessThan(99);
+      else expect(score.score, slug).toBe(100);
+    }
+  });
 });
 
-function createNativeShapeBridgeFixture(
-  fixture: PaintProjectionFixture,
-  variantPngPath: string,
-): { evidence: NativeFrameScoreInput; pairs: ReferencePair[] } {
+function createNativeShapeBridgeFixture(fixture: PaintProjectionFixture): {
+  evidence: NativeFrameScoreInput;
+  pairs: ReferencePair[];
+  alteredPngs: ReadonlyMap<string, string>;
+} {
   const svgPath = fixture.input.candidateSvgPath;
   const sourcePngPath = fixture.input.candidatePngPath;
-  const rows = NATIVE_FRAME_TARGETS.map((slug) => ({
-    slug,
-    inputSvg: { path: svgPath, sha256: fileSha256(svgPath) },
-    sourcePng: { path: sourcePngPath, sha256: fileSha256(sourcePngPath) },
-    png: { path: variantPngPath, sha256: fileSha256(variantPngPath) },
-  }));
+  const alteredPngs = new Map<string, string>([
+    [NATIVE_FRAME_TARGETS[1], fixture.missingLabelPngPath],
+    [NATIVE_FRAME_TARGETS[2], fixture.missingEdgePngPath],
+  ]);
+  const rows = NATIVE_FRAME_TARGETS.map((slug) => {
+    const png = alteredPngs.get(slug) ?? sourcePngPath;
+    return {
+      slug,
+      inputSvg: { path: svgPath, sha256: fixture.input.candidateSvgSha256 },
+      sourcePng: { path: sourcePngPath, sha256: fixture.input.candidatePngSha256 },
+      png: { path: png, sha256: fileSha256(png) },
+    };
+  });
   return {
+    alteredPngs,
     evidence: {
       language: "en",
       rows,
