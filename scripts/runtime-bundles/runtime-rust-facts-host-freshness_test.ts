@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect, setDefaultTimeout, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { rustFactsHostInputDifferences, verifyRustFactsHost } from "./runtime-rust-facts-host";
@@ -12,6 +12,9 @@ import {
   hostEnvironmentDiagnostics,
   hostEnvironmentDigest,
 } from "./runtime-rust-facts-host-protocol";
+
+// 実Nodeを起動するツール解決でも、I/O負荷で標準の5秒を超えた。
+setDefaultTimeout(15_000);
 
 const fixtureParents = new Set<string>();
 afterAll(() => {

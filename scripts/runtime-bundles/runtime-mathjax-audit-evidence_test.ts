@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect, setDefaultTimeout, test } from "bun:test";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -19,6 +19,9 @@ import {
 import { inspectUnusedBiomeReport } from "./runtime-unused-biome";
 import { runtimeUnusedImportScan } from "./runtime-unused-import-scan";
 import { readMathJaxOwnedAuditEvidence } from "./runtime-unused-mathjax";
+
+// 実依存ツリーと物理証跡の検証は、ローカル実行で約16秒かかった。
+setDefaultTimeout(30_000);
 
 const root = fs.realpathSync(path.resolve(import.meta.dir, "../.."));
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mathjax-evidence-contract-"));
@@ -340,14 +343,13 @@ test.each(["map", "sourceMapAsset", "modules"])(
   },
 );
 
-// 実依存ツリー全体のハッシュ取得は、ローカル実行で約9秒かかった。
 test("actual NewCM font metadata and SVG module belong to acquisition pins", () => {
   const pins = inputs(root);
   for (const relative of ["package.json", "mjs/svg.js"]) {
     const file = path.join(root, "node_modules/@mathjax/mathjax-newcm-font", relative);
     expect(pins).toContainEqual(record(file));
   }
-}, 15_000);
+});
 
 test.each(["package.json", "mjs/svg.js"])(
   "current evidence rejects omitted NewCM font %s acquisition pins",

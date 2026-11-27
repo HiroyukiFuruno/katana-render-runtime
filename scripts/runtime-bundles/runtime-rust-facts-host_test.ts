@@ -1,4 +1,4 @@
-import { afterAll, expect, spyOn, test } from "bun:test";
+import { afterAll, expect, setDefaultTimeout, spyOn, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -25,6 +25,9 @@ import {
   rustFactsHostArtifactName,
 } from "./runtime-rust-facts-host-protocol";
 import { hostFixtureInputs } from "./runtime-rust-facts-host-test-fixture";
+
+// 実ツールとファイルの検証に、負荷が高い時は12秒以上かかった。
+setDefaultTimeout(15_000);
 
 const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rust-facts-host-unit-")));
 afterAll(() => fs.rmSync(directory, { recursive: true, force: true }));
