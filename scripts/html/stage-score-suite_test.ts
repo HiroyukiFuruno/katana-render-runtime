@@ -613,9 +613,14 @@ function firstImage(value: JsonValue | undefined): JsonObject {
   return image as JsonObject;
 }
 
-test("validates 84 real receipt pairs and scores every independent raw image", () => {
-  const fixture = rawCaptureFixture();
-  try {
+describe("physical catalog capture v2 receipts", () => {
+  let fixture: ReturnType<typeof rawCaptureFixture>;
+  beforeAll(() => {
+    fixture = rawCaptureFixture();
+  });
+  afterAll(() => fixture?.cleanup());
+
+  test("validates 84 real receipt pairs and scores every independent raw image", () => {
     const results = validateCatalogRawStage90Captures(
       fixture.manifest,
       fixture.plan,
@@ -623,20 +628,15 @@ test("validates 84 real receipt pairs and scores every independent raw image", (
     );
     expect(results).toHaveLength(84);
     expect(results.every((result) => result.score === 100)).toBe(true);
-  } finally {
-    fixture.cleanup();
-  }
-});
+  });
 
-test.each([
-  "missing schema",
-  "wrong schema",
-  "missing proof",
-  "changed proof",
-  "missing current build",
-] as const)("rejects catalog capture v2 with %s", (change) => {
-  const fixture = rawCaptureFixture();
-  try {
+  test.each([
+    "missing schema",
+    "wrong schema",
+    "missing proof",
+    "changed proof",
+    "missing current build",
+  ] as const)("rejects catalog capture v2 with %s", (change) => {
     const manifest = { ...fixture.manifest };
     if (change === "missing schema") delete manifest.schema;
     if (change === "wrong schema") manifest.schema = "krr-html84-catalog-captures-v1";
@@ -649,9 +649,7 @@ test.each([
     expect(() =>
       validateCatalogRawStage90Captures(manifest, fixture.plan, fixture.planPath),
     ).toThrow();
-  } finally {
-    fixture.cleanup();
-  }
+  });
 });
 
 test.each([
