@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -21,6 +21,9 @@ import {
   requireNativeRenderInventory,
   validateCliAttestation,
 } from "./native-render-provenance";
+
+// 実Gitと物理ファイルを使う証跡検証は、負荷が高い時に約15秒かかった。
+setDefaultTimeout(30_000);
 
 const nativeRenderOptionArgs = [
   "--fixtures-dir",

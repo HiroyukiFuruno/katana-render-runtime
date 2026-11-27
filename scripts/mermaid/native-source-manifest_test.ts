@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -18,6 +18,9 @@ import {
   captureNativeCoverageSourceInputs,
   captureNativeSourceManifest,
 } from "./native-source-manifest";
+
+// 実Gitでソースとインデックスを照合するテストの実行上限。
+setDefaultTimeout(30_000);
 
 test("captures current bytes and detects source changes with an unchanged HEAD", () => {
   withGitRepository((root) => {
