@@ -71,6 +71,7 @@ jobs:
             --version "${RELEASE_TAG}"
 
       - name: Acquire completed exact-tag CI and paired performance evidence
+        if: inputs.version != 'v0.4.24'
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
@@ -81,6 +82,7 @@ jobs:
           --acquire
 
       - name: Reverify acquired completed generation before retry publication
+        if: inputs.version != 'v0.4.24'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.version }}

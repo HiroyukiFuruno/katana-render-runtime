@@ -1099,7 +1099,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         )
         self.assertRegex(
             self.justfile,
-            r"(?m)^release-verify: release-target-check html-performance-nonregression-check$",
+            r"(?m)^release-verify: release-target-check html-performance-publication-check$",
         )
 
         for workflow, name in (

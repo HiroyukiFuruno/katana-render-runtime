@@ -1,5 +1,7 @@
 # 品質ゲート改善の作業台帳
 
+v0.4.24は現行の描画実装で先に公開する。HTMLの時間・メモリの非劣化確認は公開後に実施し、既知の差分をリリースノートに記載する。HTML画像・書体の84条件、Mermaidの比較、カバレッジ、レビュー、必須CIは公開前に確認する。
+
 ## 3 OSのシステム書体検索（2026-11-24）
 
 - [/] 書体探索は既存の `PlatformFontStrategy` を境界とし、macOSのCoreText、WindowsのFontique経由のDirectWrite、LinuxのFontconfigを確認した。現行のFontiqueとfontdbを最初の評価対象とする。代替候補の [Martensite Font Fallback](https://docs.rs/martensite-font-fallback/latest/martensite_font_fallback/) は3 OSのネイティブ照会を提供し、[font-kit](https://docs.rs/font-kit/latest/font_kit/) はシステム書体の探索とCSS書体マッチングを提供する。Chromeと同じ書体面と画像を出すこと、表示時間とメモリを維持することはKRRへの組み込み測定で判断する。

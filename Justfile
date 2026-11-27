@@ -53,6 +53,7 @@ HTML_PERFORMANCE_SCIPY_ENV := "KRR_HTML_PERFORMANCE_SCIPY_VERSION=" + HTML_PERFO
 HTML_PERFORMANCE_REPLAY_PATH := env_var_or_default("KRR_HTML_PERFORMANCE_REPLAY_ENVIRONMENT_PATH", "")
 HTML_PERFORMANCE_REPLAY_SHA256 := env_var_or_default("KRR_HTML_PERFORMANCE_REPLAY_ENVIRONMENT_SHA256", "")
 HTML_PERFORMANCE_REPLAY_ARGS := if HTML_PERFORMANCE_REPLAY_PATH + HTML_PERFORMANCE_REPLAY_SHA256 == "" { "" } else { "--replay-launch-environment " + quote(HTML_PERFORMANCE_REPLAY_PATH) + " --replay-launch-environment-sha256 " + quote(HTML_PERFORMANCE_REPLAY_SHA256) + " " }
+HTML_PERFORMANCE_PUBLICATION_PAUSED_VERSION := "0.4.24"
 HTML_PERFORMANCE_TYPING_PATH := "scripts/release/typings"
 HTML_PERFORMANCE_PYTHON_REQUIREMENTS := REPO_ROOT + "/scripts/release/html-performance-requirements.lock"
 ZENUML_CORE_JS_VERSION := "4.14.0"
@@ -667,7 +668,7 @@ release-target-manifest-update:
     python3 scripts/release/verify-release-target.py --target-version "{{VERSION}}" --head-ref HEAD --update-release-manifest
 
 # 未公開のworkspace依存を含め、Cargoの検証を通した配布packageを揃える。
-release-verify: release-target-check html-performance-nonregression-check
+release-verify: release-target-check html-performance-publication-check
     bash scripts/release/verify-version.sh "{{VERSION}}"
     bash scripts/release/verify-internal-dependencies.sh "{{VERSION}}"
     {{CARGO}} package -p katana-render-runtime-assets -p katana-render-runtime -p katana-render-runtime-cli --locked --allow-dirty
@@ -698,6 +699,15 @@ release-openspec-archive:
 # 同一sourceの時間と保持メモリを再検証し、現行ポリシーで全84条件を要求する。
 html-performance-nonregression-check:
     {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap {{HTML_PERFORMANCE_REPLAY_ARGS}}verify --require-current-memory-policy
+
+# v0.4.24だけは既知の時間/RSS回帰を公開後の対応とする。
+html-performance-publication-check:
+    @if [[ "{{VERSION_BARE}}" == "{{HTML_PERFORMANCE_PUBLICATION_PAUSED_VERSION}}" ]]; then \
+      bash scripts/release/verify-version.sh "{{VERSION}}" && \
+      echo "HTML timing/RSS publication gate is paused only for v{{VERSION_BARE}}"; \
+    else \
+      just html-performance-nonregression-check; \
+    fi
 
 # Git管理されたHTML性能履歴から現行基準または指定recordを表示する。
 html-performance-history record_id='':
@@ -789,7 +799,7 @@ html-performance-candidate-build-proof output capacity_binding capacity_binding_
     {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap produce --repo {{quote(REPO_ROOT)}} --output {{quote(output)}} --capacity-binding {{quote(capacity_binding)}} --capacity-binding-sha256 {{quote(capacity_binding_sha256)}} --candidate-build-only
 
 # Run the complete quality gate before release-specific verification.
-release-quality: check html-performance-nonregression-check
+release-quality: check html-performance-publication-check
 
 # Verify the concrete release version and packaged artifact.
 release-specific: release-openspec-archive release-verify

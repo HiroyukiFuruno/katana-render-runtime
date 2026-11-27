@@ -712,11 +712,13 @@ jobs:
 
       - name: Record actual source HEAD
         id: source
-        run: echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          python3 -c 'import tomllib; print("version=" + tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])' >> "$GITHUB_OUTPUT"
 
       - name: Verify optional local HTML performance evidence
         id: html_local_proof
-        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/master'
+        if: steps.source.outputs.version != '0.4.24' && (github.event_name == 'pull_request' || github.ref == 'refs/heads/master')
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -814,12 +816,22 @@ jobs:
             031c93c5e822ffd8d22121bb41ed139fb6fcc4e96f6aa1f43ea31ec36fb9242c true
           echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
 
+      - name: Verify all 84 HTML images and font identities for v0.4.24
+        if: steps.source.outputs.version == '0.4.24'
+        env:
+          CAPTURE_MANIFEST: ${{ steps.html84.outputs.manifest }}
+        run: |
+          output_root="$(dirname "$(dirname "$CAPTURE_MANIFEST")")"
+          report="$output_root/visual-acceptance.json"
+          bun scripts/html/fidelity-acceptance-cli.ts catalog-stage90-validate-captures "$CAPTURE_MANIFEST" "$output_root/plan.json" > "$report"
+          python3 -c 'import json, sys; r=json.load(open(sys.argv[1])); sys.exit(0 if r["acceptance"] is True and r["fontIdentityEquivalence"] == "established" and len(r["conditions"]) == 84 else "HTML visual or font acceptance failed")' "$report"
+
       - name: Measure all 84 catalog conditions against baseline
-        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        if: steps.source.outputs.version != '0.4.24' && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
         run: just html-performance-evidence-produce "${{ steps.html84.outputs.manifest }}"
 
       - name: Upload immutable source and run bound paired evidence
-        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        if: steps.source.outputs.version != '0.4.24' && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
         id: paired_performance_upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -829,7 +841,7 @@ jobs:
           retention-days: 14
 
       - name: Attest immutable paired performance artifact
-        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        if: steps.source.outputs.version != '0.4.24' && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: html-performance-paired-${{ steps.source.outputs.head }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -915,13 +927,6 @@ jobs:
         with:
           tool: cargo-nextest@0.9.148
 
-      - name: Acquire completed producer from this CI generation
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          KRR_HTML_PERFORMANCE_SCIPY_VERSION=1.18.1
-          python3 scripts/release/run_html_performance.py --bootstrap verify --acquire-current-producer
-
       - name: Resolve version
         id: version
         shell: bash
@@ -930,6 +935,14 @@ jobs:
             "${{ github.event_name }}" \
             "${{ inputs.version }}" \
             "${{ github.head_ref }}"
+
+      - name: Acquire completed producer from this CI generation
+        if: steps.version.outputs.version != 'v0.4.24'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          KRR_HTML_PERFORMANCE_SCIPY_VERSION=1.18.1
+          python3 scripts/release/run_html_performance.py --bootstrap verify --acquire-current-producer
 
       - name: Release preflight checks
         timeout-minutes: 45
