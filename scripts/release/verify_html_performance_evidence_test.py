@@ -59,7 +59,7 @@ class Issue126ReleaseExceptionIntegrationTest(unittest.TestCase):
             "head": "d40d53daf9287f668e0f93ce1c11124658cc234a",
             "files": [],
         }))
-        return gate.Bundle(bundle_path)
+        return canonical_gate.Bundle(bundle_path)
 
     def test_v7_policy_exception_receives_only_authenticated_inputs(self) -> None:
         repository = Path(__file__).resolve().parents[2]
