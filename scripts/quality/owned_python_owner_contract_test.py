@@ -278,6 +278,23 @@ class MoonOwnerAstContractTests(unittest.TestCase):
         self.assertEqual(tasks["capacity-admission"]["deps"], ["source-static-foundation"])
         self.assertEqual(tasks["unit-test"]["leaf"], "unit-test")
 
+    def test_performance_bootstrap_requires_runtime_preflight_after_static(self) -> None:
+        marker = '''assert automation_performance.get("deps") == [
+        "static",
+        "runtime-asset-script-preflight",
+    ]'''
+        self.assertEqual(self.source.count(marker), 1)
+        self.assertIs(
+            self.inspect(
+                self.source.replace(
+                    marker,
+                    'assert automation_performance.get("deps") == ["static"]',
+                    1,
+                )
+            )["valid"],
+            False,
+        )
+
     def test_verify_runner_is_pinned_to_all_leaves(self) -> None:
         original = 'assert command == ["just", "runtime-unused-script-verify-run", leaf]'
         self.assertEqual(self.source.count(original), 1)

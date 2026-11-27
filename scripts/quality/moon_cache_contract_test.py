@@ -343,7 +343,14 @@ def production_task_input_binding(
         declared.get("runtime-script-cas-diagnostic")
     )
     runtime_aggregate = moon_json_object(declared.get("runtime-asset-script-test"))
+    automation_performance = moon_json_object(
+        declared.get("automation-performance-bootstrap-test")
+    )
     assert runtime_preflight.get("deps") == ["mathjax-owned-evidence"]
+    assert automation_performance.get("deps") == [
+        "static",
+        "runtime-asset-script-preflight",
+    ]
     assert classic_evidence.get("deps") == ["runtime-asset-script-preflight"]
     assert runtime_other.get("deps") == ["runtime-classic-generation-evidence"]
     assert runtime_unused.get("deps") == SCHEDULER_DEPENDENCIES["runtime-unused-script-regression"]

@@ -291,6 +291,7 @@ const mathJaxFactsRecipe =
 
 function actualRuntimeAssetTestInvocations(): string[][] {
   return [
+    actualRecipeBody("runtime-asset-script-preflight-run"),
     actualRecipeBody("runtime-asset-script-other-run"),
     ...RUNTIME_QUALITY_LEAVES.map(([id]) => actualRecipeBody(`${id}-run`)),
   ]
@@ -876,6 +877,9 @@ test("runtime asset registration uses Playwright without dropping sibling Bun te
   for (const playwrightUnit of playwrightUnitPaths)
     expect(actualRuntimeAssetUnitPaths()).not.toContain(playwrightUnit);
   expect(actualRuntimeAssetUnitPaths()).toEqual(expect.arrayContaining(pureHtmlTests));
+  expect(actualRuntimeAssetUnitPaths()).toContain(
+    "scripts/mermaid/native_cli_managed_frozen_build_test.ts",
+  );
 });
 
 for (const requiredTest of [
@@ -2049,16 +2053,12 @@ test.each([
 );
 const frozenNativeUnitCommand =
   "bun test --path-ignore-patterns 'tmp/**' ./scripts/mermaid/native_cli_managed_frozen_build_test.ts";
-const nativeBuildUnitCommand =
-  "bun test --path-ignore-patterns 'tmp/**' ./scripts/mermaid/native_cli_managed_build_test.ts";
 
-test("frozen native unit registration accepts the current mandatory lane", () => {
-  const root = parserFixture();
-  const recipe = actualRecipeBody("runtime-asset-script-test");
-  expect(recipe).toContain(`${nativeBuildUnitCommand}\n${frozenNativeUnitCommand}`);
-  expect(inspectParserBodyOnloadRoute(root).issues).not.toContainEqual(
-    expect.objectContaining({ code: "parser-body-onload-test-unregistered" }),
-  );
+test("frozen native unit registration accepts the preflight tail", () => {
+  const root = strictUnusedRegistrationFixture();
+  const recipe = actualRecipeBody("runtime-asset-script-preflight-run");
+  expect(recipe.split("\n").at(-1)).toBe(frozenNativeUnitCommand);
+  expect(inspectMathJaxUnusedAuditRoute(root).binding.standardCommandVerified).toBe(true);
 });
 
 const patchedMermaidUnit = "./scripts/runtime-assets/patched-mermaid-build_test.ts";
@@ -2092,31 +2092,6 @@ test.each([
   recipes(root, {
     "runtime-asset-script-test": recipe.replace(patchedMermaidNeighbors, replacement),
   });
-  track(root);
-  expect(inspectParserBodyOnloadRoute(root).issues).toContainEqual(
-    expect.objectContaining({ code: "parser-body-onload-test-unregistered" }),
-  );
-});
-
-test.each([
-  ["missing", frozenNativeUnitCommand, ""],
-  ["duplicate", frozenNativeUnitCommand, `${frozenNativeUnitCommand}\n${frozenNativeUnitCommand}`],
-  [
-    "unknown command",
-    frozenNativeUnitCommand,
-    `${frozenNativeUnitCommand}\nbun test ./unknown_test.ts`,
-  ],
-  ["extra argument", frozenNativeUnitCommand, `${frozenNativeUnitCommand} ./unknown_test.ts`],
-  [
-    "reordered",
-    `${nativeBuildUnitCommand}\n${frozenNativeUnitCommand}`,
-    `${frozenNativeUnitCommand}\n${nativeBuildUnitCommand}`,
-  ],
-] as const)("frozen native unit registration rejects %s", (_name, before, after) => {
-  const root = parserFixture();
-  const recipe = actualRecipeBody("runtime-asset-script-test");
-  expect(recipe).toContain(before);
-  recipes(root, { "runtime-asset-script-test": recipe.replace(before, after) });
   track(root);
   expect(inspectParserBodyOnloadRoute(root).issues).toContainEqual(
     expect.objectContaining({ code: "parser-body-onload-test-unregistered" }),
@@ -5717,6 +5692,36 @@ const hostEvidenceRecipeMutations = [
     "bun scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts verify",
     "bun scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts",
     "runtime-asset-script-preflight-run",
+  ],
+  [
+    "missing frozen native preflight test",
+    frozenNativeUnitCommand,
+    "",
+    "runtime-asset-script-preflight-run",
+  ],
+  [
+    "duplicate frozen native preflight test",
+    frozenNativeUnitCommand,
+    `${frozenNativeUnitCommand}\n${frozenNativeUnitCommand}`,
+    "runtime-asset-script-preflight-run",
+  ],
+  [
+    "unsafe frozen native preflight arguments",
+    frozenNativeUnitCommand,
+    `${frozenNativeUnitCommand} ./unknown_test.ts`,
+    "runtime-asset-script-preflight-run",
+  ],
+  [
+    "frozen native preflight test is not last",
+    frozenNativeUnitCommand,
+    `${frozenNativeUnitCommand}\nbun test ./unknown_test.ts`,
+    "runtime-asset-script-preflight-run",
+  ],
+  [
+    "frozen native preflight test duplicated in the other lane",
+    "bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-assets/svg-engine-provenance_test.ts",
+    `bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-assets/svg-engine-provenance_test.ts\n${frozenNativeUnitCommand}`,
+    "runtime-asset-script-other-run",
   ],
 ] satisfies readonly RecipeMutation[];
 

@@ -229,6 +229,8 @@ const CLASSIC_GENERATION_EVIDENCE_PRODUCER =
 const CLASSIC_GENERATION_EVIDENCE_RECIPE = "runtime-classic-generation-evidence";
 const RUNTIME_ASSET_PREFLIGHT_RECIPE = "runtime-asset-script-preflight-run";
 const RUNTIME_ASSET_OTHER_RECIPE = "runtime-asset-script-other-run";
+const FROZEN_NATIVE_UNIT_PATH = "./scripts/mermaid/native_cli_managed_frozen_build_test.ts";
+const FROZEN_NATIVE_UNIT_COMMAND = `bun test --path-ignore-patterns 'tmp/**' ${FROZEN_NATIVE_UNIT_PATH}`;
 const SVG_ENGINE_PROVENANCE_TEST_COMMAND =
   "bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-assets/svg-engine-provenance_test.ts";
 const SVG_ENGINE_VENDOR_ROOT = "crates/katana-render-runtime/vendor/svg-engine";
@@ -2666,8 +2668,9 @@ function hostEvidenceRecipesRegistered(context: ContractContext): boolean {
     context.recipes.get(RUNTIME_UNUSED_FINAL_VERIFY_RECIPE)?.trim() ===
       RUNTIME_UNUSED_FINAL_VERIFY_COMMAND &&
     reviewedRuntimeAggregateBody(context) === MATHJAX_UNUSED_STANDARD_GATE_COMMAND &&
-    preflight.length === HOST_EVIDENCE_PRECONDITIONS.length &&
+    preflight.length === HOST_EVIDENCE_PRECONDITIONS.length + 1 &&
     HOST_EVIDENCE_PRECONDITIONS.every((command, index) => preflight[index] === command) &&
+    preflight.at(-1) === FROZEN_NATIVE_UNIT_COMMAND &&
     registered(context, RUNTIME_ASSET_PREFLIGHT_RECIPE) &&
     unusedRegressionRecipeVerified(context) &&
     runtimeUnusedLeafRecipesVerified(context) &&
@@ -4296,11 +4299,13 @@ function reviewedRuntimeAssetTestCommandsWithoutClassic(lines: string[]): string
   const withoutStandardGate = withoutAudit.includes(MATHJAX_UNUSED_STANDARD_GATE_COMMAND)
     ? removeTerminalRecipeCommand(withoutAudit, MATHJAX_UNUSED_STANDARD_GATE_COMMAND)
     : withoutAudit;
-  if (!withoutStandardGate) return undefined;
+  if (
+    !withoutStandardGate ||
+    withoutStandardGate.some((line) => unitCommand(line).includes(FROZEN_NATIVE_UNIT_PATH))
+  )
+    return undefined;
 
-  const withoutFrozenNativeTest = removeRequiredFrozenNativeTest(withoutStandardGate);
-  if (!withoutFrozenNativeTest) return undefined;
-  const withoutReviewedTests = removeReviewedRuntimeAssetTests(withoutFrozenNativeTest);
+  const withoutReviewedTests = removeReviewedRuntimeAssetTests(withoutStandardGate);
   const digest = withoutReviewedTests ? sha(withoutReviewedTests.join("\n")) : "none";
   return withoutReviewedTests && digest === PARSER_TEST_RECIPE_SHA256
     ? withoutReviewedTests
@@ -4331,28 +4336,6 @@ function removeReviewedDrawioTestCommands(lines: string[]): string[] | undefined
   )
     return undefined;
   return lines.filter((_, index) => !matches.includes(index));
-}
-function removeRequiredFrozenNativeTest(lines: string[]): string[] | undefined {
-  const previous =
-    "bun test --path-ignore-patterns 'tmp/**' ./scripts/mermaid/native_cli_managed_build_test.ts";
-  const command =
-    "bun test --path-ignore-patterns 'tmp/**' ./scripts/mermaid/native_cli_managed_frozen_build_test.ts";
-  const token = "./scripts/mermaid/native_cli_managed_frozen_build_test.ts";
-  const occurrences = lines.flatMap((line, index) =>
-    unitCommand(line)
-      .filter((word) => word === token)
-      .map(() => index),
-  );
-  const index = occurrences[0];
-  if (
-    occurrences.length !== 1 ||
-    index === undefined ||
-    lines[index] !== command ||
-    index === 0 ||
-    lines[index - 1] !== previous
-  )
-    return undefined;
-  return lines.filter((_, position) => position !== index);
 }
 function removeTerminalRecipeCommand(lines: string[], command: string): string[] | undefined {
   const indexes = lines.flatMap((line, index) => (line === command ? [index] : []));

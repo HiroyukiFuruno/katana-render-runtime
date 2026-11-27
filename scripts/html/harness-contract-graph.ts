@@ -4522,8 +4522,12 @@ function moonAutomationContractGraphVerified(
   ];
   for (const [taskName, command] of leaves) {
     const task = tasks.get(taskName);
+    const expectedDependencies =
+      taskName === "automation-performance-bootstrap-test"
+        ? "static\0runtime-asset-script-preflight"
+        : "static";
     if (
-      task?.deps.join("\0") !== "static" ||
+      task?.deps.join("\0") !== expectedDependencies ||
       task.leaf !== taskName ||
       recipes.get(taskName)?.trim() !== command
     )

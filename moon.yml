@@ -365,7 +365,7 @@ tasks:
 
   automation-performance-bootstrap-test:
     command: ['just', 'automation-performance-bootstrap-test']
-    deps: ['static']
+    deps: ['static', 'runtime-asset-script-preflight']
     inputs: *quality-inputs
 
   automation-quality-test:
