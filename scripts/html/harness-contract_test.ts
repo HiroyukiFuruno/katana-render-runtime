@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, spyOn, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -52,6 +52,7 @@ import { MOON_QUALITY_INPUTS } from "./moon-quality-inputs";
 
 // WHY: 実リポジトリの依存グラフを読むケースには、実測した処理量に応じた上限を設ける。
 const REPOSITORY_GRAPH_TEST_TIMEOUT_MS = 15_000;
+setDefaultTimeout(REPOSITORY_GRAPH_TEST_TIMEOUT_MS);
 
 test.each([
   [
@@ -4043,15 +4044,11 @@ function bypassPerformanceCoverageWrapper(snapshot: HarnessSnapshot): void {
   );
 }
 
-test.each(combinedCoverageFaults)(
-  "combined coverage contract rejects %s",
-  (_fault, mutate) => {
-    const snapshot = combinedCoverageMoonFixture();
-    mutate(snapshot);
-    expect(checkHarnessContract(snapshot).length).toBeGreaterThan(0);
-  },
-  REPOSITORY_GRAPH_TEST_TIMEOUT_MS,
-);
+test.each(combinedCoverageFaults)("combined coverage contract rejects %s", (_fault, mutate) => {
+  const snapshot = combinedCoverageMoonFixture();
+  mutate(snapshot);
+  expect(checkHarnessContract(snapshot).length).toBeGreaterThan(0);
+});
 
 test.each([
   ["CARGO override", "CARGO={{quote(CARGO)}}", "CARGO=cargo"],
@@ -4246,7 +4243,6 @@ test.each(["missing", "ignored"])(
       "performance collection authentication differs",
     );
   },
-  REPOSITORY_GRAPH_TEST_TIMEOUT_MS,
 );
 
 test.each(["root before performance", "artifact producer after root"])(
