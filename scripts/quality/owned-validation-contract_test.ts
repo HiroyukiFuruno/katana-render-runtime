@@ -59,8 +59,8 @@ import {
   NATIVE_WIDTH_HASH_INPUTS,
 } from "./owned-validation-contract";
 
-// 実Gitを使うfixtureはローカル実行で8秒近く要したため、既存の契約検査の上限を使う。
-const REPOSITORY_GRAPH_TEST_TIMEOUT_MS = 15_000;
+// 実GitとTypeScriptを使うfixtureは、マシン負荷が高い時に15秒を超えた。
+const REPOSITORY_GRAPH_TEST_TIMEOUT_MS = 30_000;
 setDefaultTimeout(REPOSITORY_GRAPH_TEST_TIMEOUT_MS);
 
 const fixtures: string[] = [];
