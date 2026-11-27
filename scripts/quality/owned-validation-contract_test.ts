@@ -241,20 +241,21 @@ function recipes(root: string, overrides: Record<string, string> = {}): void {
     bodies["check-standard"] =
       `${bodies["check-standard"] ?? ""}\njust rust-facts-host-prebuild\njust mathjax-owned-evidence`;
   } else {
-    const body = bodies["runtime-asset-script-other-run"] ?? "";
-    bodies["runtime-asset-script-other-run"] = body
-      .split("\n")
-      .filter(
-        (line) =>
-          !line.startsWith("bun scripts/runtime-bundles/runtime-rust-facts-host.ts verify ") &&
-          line !==
-            "NODE_ENV=test bun scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts verify",
-      )
-      .join("\n");
+    for (const recipe of ["runtime-asset-script-other-run", "runtime-asset-script-preflight-run"]) {
+      bodies[recipe] = (bodies[recipe] ?? "")
+        .split("\n")
+        .filter(
+          (line) =>
+            !line.startsWith("bun scripts/runtime-bundles/runtime-rust-facts-host.ts verify ") &&
+            line !==
+              "NODE_ENV=test bun scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts verify",
+        )
+        .join("\n");
+    }
   }
   bodies["runtime-asset-script-test"] = strictRuntimeFixture
     ? "bun run moon exec krr:runtime-asset-script-test"
-    : "just runtime-asset-script-other-run\njust runtime-unused-script-regression-run";
+    : "just runtime-asset-script-preflight-run\njust runtime-asset-script-other-run\njust runtime-unused-script-regression-run";
   write(
     root,
     "Justfile",
