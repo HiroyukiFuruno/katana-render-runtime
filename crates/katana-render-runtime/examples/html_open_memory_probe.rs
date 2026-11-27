@@ -114,7 +114,7 @@ impl ProbeOptions {
     }
 }
 
-fn validate_options(input: &PathBuf, width: u32, height: u32, scale: f32) -> ProbeResult<()> {
+fn validate_options(input: &Path, width: u32, height: u32, scale: f32) -> ProbeResult<()> {
     if !input.is_file() {
         return Err(format!("input HTML is missing: {}", input.display()).into());
     }
