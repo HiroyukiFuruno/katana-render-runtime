@@ -588,10 +588,21 @@ runtime-package-asset-check:
 
 # Verify repository hook and release cleanup contracts
 automation-contract-test:
+    bun run moon exec krr:automation-contract-test
+
+automation-hooks-test:
     python3 -m unittest discover -s scripts/hooks -p '*_test.py' --failfast
+
+automation-performance-bootstrap-test:
     {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap test
+
+automation-quality-test:
     python3 -m unittest discover -s scripts/quality -p '*_test.py' --failfast
+
+automation-mermaid-test:
     uv run --no-project --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} python3 -m unittest discover -s scripts/mermaid -p '*_test.py' --failfast
+
+automation-validation-timing-test:
     python3 -m unittest discover -s scripts/validation-timing -p test_measure.py --failfast
 
 # 必要時の要求適合レビューを明示実行し、DraftのPRレビューとの重複を避ける。

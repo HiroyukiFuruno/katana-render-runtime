@@ -349,7 +349,37 @@ tasks:
     inputs: *quality-inputs
 
   automation-contract-test:
-    command: ['just', 'automation-contract-test']
+    command: noop
+    deps:
+      - automation-hooks-test
+      - automation-performance-bootstrap-test
+      - automation-quality-test
+      - automation-mermaid-test
+      - automation-validation-timing-test
+    inputs: *quality-inputs
+
+  automation-hooks-test:
+    command: ['just', 'automation-hooks-test']
+    deps: ['static']
+    inputs: *quality-inputs
+
+  automation-performance-bootstrap-test:
+    command: ['just', 'automation-performance-bootstrap-test']
+    deps: ['static']
+    inputs: *quality-inputs
+
+  automation-quality-test:
+    command: ['just', 'automation-quality-test']
+    deps: ['static']
+    inputs: *quality-inputs
+
+  automation-mermaid-test:
+    command: ['just', 'automation-mermaid-test']
+    deps: ['static']
+    inputs: *quality-inputs
+
+  automation-validation-timing-test:
+    command: ['just', 'automation-validation-timing-test']
     deps: ['static']
     inputs: *quality-inputs
 

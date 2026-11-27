@@ -4481,6 +4481,7 @@ function moonCoverageGraphVerified(
     errors.push("moon coverage performance dependency missing");
   if (!moonClosure("unit-test", tasks).has("runtime-asset-script-test"))
     errors.push("moon root coverage prerequisites missing");
+  moonAutomationContractGraphVerified(tasks, recipes, errors);
   moonRuntimeUnusedGraphVerified(tasks, recipes, errors);
   const assetAggregate = tasks.get("runtime-asset-script-test");
   if (
@@ -4490,6 +4491,52 @@ function moonCoverageGraphVerified(
       ["runtime-asset-script-other", "runtime-unused-script-regression"].join("\0")
   )
     errors.push("moon asset script aggregate differs");
+}
+
+function moonAutomationContractGraphVerified(
+  tasks: Map<string, MoonTask>,
+  recipes: Map<string, string>,
+  errors: string[],
+): void {
+  const leaves: ReadonlyArray<readonly [string, string]> = [
+    [
+      "automation-hooks-test",
+      "python3 -m unittest discover -s scripts/hooks -p '*_test.py' --failfast",
+    ],
+    [
+      "automation-performance-bootstrap-test",
+      "{{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap test",
+    ],
+    [
+      "automation-quality-test",
+      "python3 -m unittest discover -s scripts/quality -p '*_test.py' --failfast",
+    ],
+    [
+      "automation-mermaid-test",
+      "uv run --no-project --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} python3 -m unittest discover -s scripts/mermaid -p '*_test.py' --failfast",
+    ],
+    [
+      "automation-validation-timing-test",
+      "python3 -m unittest discover -s scripts/validation-timing -p test_measure.py --failfast",
+    ],
+  ];
+  for (const [taskName, command] of leaves) {
+    const task = tasks.get(taskName);
+    if (
+      task?.deps.join("\0") !== "static" ||
+      task.leaf !== taskName ||
+      recipes.get(taskName)?.trim() !== command
+    )
+      errors.push(`automation contract leaf differs: ${taskName}`);
+  }
+  const aggregate = tasks.get("automation-contract-test");
+  if (
+    aggregate?.deps.join("\0") !== leaves.map(([name]) => name).join("\0") ||
+    aggregate.leaf !== undefined ||
+    recipes.get("automation-contract-test")?.trim() !==
+      "bun run moon exec krr:automation-contract-test"
+  )
+    errors.push("automation contract aggregate differs");
 }
 
 function moonRuntimeUnusedGraphVerified(

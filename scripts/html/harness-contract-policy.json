@@ -64,7 +64,11 @@
       "mathjax-owned-evidence",
       "unit-test",
       "runtime-asset-script-test",
-      "automation-contract-test",
+      "automation-hooks-test",
+      "automation-performance-bootstrap-test",
+      "automation-quality-test",
+      "automation-mermaid-test",
+      "automation-validation-timing-test",
       "build-capacity-check",
       "coverage"
     ]

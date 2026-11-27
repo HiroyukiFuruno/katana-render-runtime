@@ -708,73 +708,39 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
     def test_automation_contract_tests_fail_fast_with_all_discovery_scopes(
         self,
     ) -> None:
-        start = self.justfile.index("automation-contract-test:")
-        end = self.justfile.index("\n\n", start)
-        recipe = self.justfile[start:end]
-        commands = [
-            shlex.split(line.strip())
-            for line in recipe.splitlines()[1:]
-            if line.strip()
-        ]
-        expected = [
-            [
-                "python3",
-                "-m",
-                "unittest",
-                "discover",
-                "-s",
-                "scripts/hooks",
-                "-p",
-                "*_test.py",
-                "--failfast",
+        def recipe(name: str) -> list[str]:
+            start = self.justfile.index(f"{name}:")
+            end = self.justfile.find("\n\n", start)
+            body = self.justfile[start:] if end < 0 else self.justfile[start:end]
+            return [line.strip() for line in body.splitlines()[1:] if line.strip()]
+
+        self.assertEqual(recipe("automation-contract-test"), ["bun run moon exec krr:automation-contract-test"])
+        expected = {
+            "automation-hooks-test": [
+                "python3", "-m", "unittest", "discover", "-s", "scripts/hooks", "-p",
+                "*_test.py", "--failfast",
             ],
-            [
-                "{{HTML_PERFORMANCE_SCIPY_ENV}}",
-                "python3",
-                "scripts/release/run_html_performance.py",
-                "--bootstrap",
-                "test",
+            "automation-performance-bootstrap-test": [
+                "{{HTML_PERFORMANCE_SCIPY_ENV}}", "python3",
+                "scripts/release/run_html_performance.py", "--bootstrap", "test",
             ],
-            [
-                "python3",
-                "-m",
-                "unittest",
-                "discover",
-                "-s",
-                "scripts/quality",
-                "-p",
-                "*_test.py",
-                "--failfast",
+            "automation-quality-test": [
+                "python3", "-m", "unittest", "discover", "-s", "scripts/quality", "-p",
+                "*_test.py", "--failfast",
             ],
-            [
-                "uv",
-                "run",
-                "--no-project",
-                "--with-requirements",
-                "{{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}}",
-                "python3",
-                "-m",
-                "unittest",
-                "discover",
-                "-s",
-                "scripts/mermaid",
-                "-p",
-                "*_test.py",
-                "--failfast",
+            "automation-mermaid-test": [
+                "uv", "run", "--no-project", "--with-requirements",
+                "{{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}}", "python3", "-m", "unittest",
+                "discover", "-s", "scripts/mermaid", "-p", "*_test.py", "--failfast",
             ],
-            [
-                "python3",
-                "-m",
-                "unittest",
-                "discover",
-                "-s",
-                "scripts/validation-timing",
-                "-p",
-                "test_measure.py",
-                "--failfast",
+            "automation-validation-timing-test": [
+                "python3", "-m", "unittest", "discover", "-s", "scripts/validation-timing",
+                "-p", "test_measure.py", "--failfast",
             ],
-        ]
-        self.assertEqual(commands, expected)
+        }
+        for name, command in expected.items():
+            with self.subTest(recipe=name):
+                self.assertEqual([shlex.split(line) for line in recipe(name)], [command])
 
     @staticmethod
     def workflow_step(workflow: str, name: str) -> str:

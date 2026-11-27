@@ -3603,6 +3603,12 @@ function coverageFixtureJustfile(base: string): string {
     ]),
   );
   const runtimeRecipeNames = [
+    "automation-contract-test",
+    "automation-hooks-test",
+    "automation-performance-bootstrap-test",
+    "automation-quality-test",
+    "automation-mermaid-test",
+    "automation-validation-timing-test",
     "runtime-asset-script-aggregate-run",
     "runtime-asset-script-test",
     "capacity-admission",
@@ -3771,6 +3777,12 @@ function localCoverageMoonFixture(): HarnessSnapshot {
   snapshot.policy.moon.requiredHeavy.push("coverage", "unit-test", "runtime-asset-script-test");
   const actualTasks = z.record(z.string(), z.unknown()).parse(currentMoonConfig().tasks);
   const currentRuntimeTaskNames = [
+    "automation-contract-test",
+    "automation-hooks-test",
+    "automation-performance-bootstrap-test",
+    "automation-quality-test",
+    "automation-mermaid-test",
+    "automation-validation-timing-test",
     "unit-test",
     "runtime-asset-script-test",
     "runtime-classic-generation-evidence",
@@ -4091,6 +4103,29 @@ test("local coverage entry preserves static barrier and required heavy closure",
     "performance-harness-coverage:\n    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/hooks/run_locked_command.py --performance-coverage",
   );
   expect(justfile).toMatch(/\[private\]\s*\nperformance-harness-coverage-run:/);
+});
+
+test.each([
+  [
+    "automation contract aggregate differs",
+    (tasks: Record<string, TestMoonTask>) => {
+      const aggregate = tasks["automation-contract-test"];
+      if (!aggregate) throw new Error("automation aggregate task missing");
+      aggregate.deps = aggregate.deps?.filter((name) => name !== "automation-hooks-test");
+    },
+  ],
+  [
+    "automation contract leaf differs: automation-hooks-test",
+    (tasks: Record<string, TestMoonTask>) => {
+      const leaf = tasks["automation-hooks-test"];
+      if (!leaf) throw new Error("automation hooks task missing");
+      leaf.deps = [];
+    },
+  ],
+] as const)("automation contract rejects %s", (error, mutate) => {
+  const snapshot = localCoverageMoonFixture();
+  changeMoon(snapshot, mutate);
+  expect(checkHarnessContract(snapshot)).toContain(error);
 });
 
 test.each(RUNTIME_UNUSED_LEAF_IDS)(

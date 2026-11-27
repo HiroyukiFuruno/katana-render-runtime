@@ -536,7 +536,6 @@ fn local_quality_gate_runs_repository_automation_contract_tests()
     let root = workspace_root()?;
     let justfile = std::fs::read_to_string(root.join("Justfile"))?;
     let check = recipe_body(&justfile, "check")?;
-    let automation = recipe_body(&justfile, "automation-contract-test")?;
     let release_test_runner =
         std::fs::read_to_string(root.join("scripts/release/run_html_performance.py"))?;
     let scheduler = std::fs::read_to_string(root.join("scripts/hooks/run_parallel_checks.py"))?;
@@ -545,7 +544,7 @@ fn local_quality_gate_runs_repository_automation_contract_tests()
 
     assert!(check.contains("run_parallel_checks.py"));
     assert_moon_quality_dag(&moon, &scheduler, &moon_workspace);
-    assert_python_automation_discovery(automation, &release_test_runner);
+    assert_python_automation_discovery(&justfile, &release_test_runner)?;
     Ok(())
 }
 
@@ -877,29 +876,66 @@ fn assert_moon_quality_dag(moon: &str, scheduler: &str, moon_workspace: &str) {
             "  check:\n    command: noop\n    inputs: *quality-inputs\n    deps:\n      - heavy-native\n      - runtime-asset-script-test\n      - automation-contract-test\n      - build-capacity-check",
         ],
     );
-    for task in ["automation-contract-test", "build-capacity-check"] {
+    assert!(moon.contains(
+        "  automation-contract-test:\n    command: noop\n    deps:\n      - automation-hooks-test\n      - automation-performance-bootstrap-test\n      - automation-quality-test\n      - automation-mermaid-test\n      - automation-validation-timing-test"
+    ));
+    for task in [
+        "automation-hooks-test",
+        "automation-performance-bootstrap-test",
+        "automation-quality-test",
+        "automation-mermaid-test",
+        "automation-validation-timing-test",
+        "build-capacity-check",
+    ] {
         assert!(moon.contains(&format!(
             "  {task}:\n    command: ['just', '{task}']\n    deps: ['static']"
         )));
     }
 }
 
-fn assert_python_automation_discovery(automation: &str, release_test_runner: &str) {
-    assert!(
-        automation.contains("unittest discover -s scripts/hooks -p '*_test.py'"),
-        "automation contract gate must discover tests under scripts/hooks"
+fn assert_python_automation_discovery(
+    justfile: &str,
+    release_test_runner: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_eq!(
+        recipe_body(justfile, "automation-contract-test")?.trim(),
+        "bun run moon exec krr:automation-contract-test",
+        "automation contract entrypoint must dispatch through Moon"
     );
-    assert!(
-        automation.contains("python3 scripts/release/run_html_performance.py --bootstrap test"),
-        "automation contract gate must invoke the release test runner"
-    );
+    for (recipe, command) in AUTOMATION_DISCOVERY_COMMANDS {
+        assert_contains_all(recipe_body(justfile, recipe)?, &[command]);
+    }
     assert!(
         release_test_runner.contains(
             "elif mode == \"test\":\n        return [sys.executable, \"-m\", \"unittest\", \"discover\", \"-s\", \"scripts/release\", \"-p\", \"*_test.py\", \"--failfast\", *arguments]"
         ),
         "release test runner must discover scripts/release *_test.py with failfast"
     );
+    Ok(())
 }
+
+const AUTOMATION_DISCOVERY_COMMANDS: [(&str, &str); 5] = [
+    (
+        "automation-hooks-test",
+        "unittest discover -s scripts/hooks -p '*_test.py' --failfast",
+    ),
+    (
+        "automation-performance-bootstrap-test",
+        "python3 scripts/release/run_html_performance.py --bootstrap test",
+    ),
+    (
+        "automation-quality-test",
+        "unittest discover -s scripts/quality -p '*_test.py' --failfast",
+    ),
+    (
+        "automation-mermaid-test",
+        "unittest discover -s scripts/mermaid -p '*_test.py' --failfast",
+    ),
+    (
+        "automation-validation-timing-test",
+        "unittest discover -s scripts/validation-timing -p test_measure.py --failfast",
+    ),
+];
 
 fn release_target_check(
     root: &Path,
