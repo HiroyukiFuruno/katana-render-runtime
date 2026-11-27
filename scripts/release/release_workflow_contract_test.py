@@ -738,6 +738,10 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                 "-p", "test_measure.py", "--failfast",
             ],
         }
+        self.assertEqual(
+            recipe("check-contracts"),
+            [*(f"just {name}" for name in expected), "just build-capacity-check"],
+        )
         for name, command in expected.items():
             with self.subTest(recipe=name):
                 self.assertEqual([shlex.split(line) for line in recipe(name)], [command])

@@ -646,7 +646,11 @@ check-assets:
 
 # Python contract suites use isolated temporary repositories.
 check-contracts:
-    just automation-contract-test
+    just automation-hooks-test
+    just automation-performance-bootstrap-test
+    just automation-quality-test
+    just automation-mermaid-test
+    just automation-validation-timing-test
     just build-capacity-check
 
 # 容量超過・使用中lock・実Cargo targetの安全条件を独立projectで検証する。
