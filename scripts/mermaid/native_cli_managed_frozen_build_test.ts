@@ -54,9 +54,14 @@ test("v4 keeps the selected Cargo proof while executing the retained copy", () =
 });
 
 test("v4 rejects changed copy, unrelated path and altered origin", () => {
-  for (const variant of ["bytes", "path", "origin"] as const) {
-    const f = createManagedReaderFixture();
-    try {
+  const f = createManagedReaderFixture();
+  const attempts = [
+    ["bytes", /managed execution binary changed after its receipt was written/],
+    ["path", /frozen binary identity differs/],
+    ["origin", /frozen binary origin differs/],
+  ] as const;
+  try {
+    for (const [variant, expected] of attempts) {
       const frozen = frozenIdentity(f, variant === "path" ? "other" : "krr");
       const origin =
         variant === "origin" ? { ...f.receipt.binary, sha256: "0".repeat(64) } : f.receipt.binary;
@@ -73,10 +78,11 @@ test("v4 rejects changed copy, unrelated path and altered origin", () => {
       }
       expect(() =>
         verifyNativeBuildReceipt(f.receiptPath, frozen.path, f.runtimePath, f.root),
-      ).toThrow();
-    } finally {
-      fs.rmSync(f.root, { recursive: true, force: true });
+      ).toThrow(expected);
+      fs.unlinkSync(frozen.path);
     }
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
   }
 });
 
