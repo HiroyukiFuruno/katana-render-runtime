@@ -1,4 +1,4 @@
-import { afterAll, expect, setDefaultTimeout, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { createContext, runInContext } from "node:vm";
@@ -41,9 +41,6 @@ import {
   semanticContextPin,
   sharedUnusedSemanticPoint,
 } from "./runtime-unused-semantic-adapter";
-
-// 実TypeScriptと生成済みバンドルの読み直しを含む契約検査の実行上限。
-setDefaultTimeout(30_000);
 
 const root = fs.realpathSync(process.cwd());
 const evidence = path.join(
@@ -154,8 +151,7 @@ function fixture(
   return { run, manifest, report, context, directory, sourcePaths, binding };
 }
 
-function actualGeneratedFixture() {
-  const directory = fs.mkdtempSync(path.join(suiteDirectory, "generated-"));
+function prepareActualGeneratedFixture() {
   const definition = runtimeBundleDefinitions().find((item) => item.name === "mermaid");
   if (!definition) throw new Error("missing actual Mermaid definition");
   const raw = new Map(
@@ -255,6 +251,18 @@ function actualGeneratedFixture() {
     summary: { errors: 0, warnings: diagnostics.length, diagnosticsNotPrinted: 0 },
     diagnostics,
   };
+  return { raw, context, manifest, report };
+}
+
+let actualGeneratedInput: ReturnType<typeof prepareActualGeneratedFixture> | undefined;
+
+function actualGeneratedFixture() {
+  const directory = fs.mkdtempSync(path.join(suiteDirectory, "generated-"));
+  // 同じ入力の構文解析を共有し、改変するmanifestはケースごとに複製する。
+  actualGeneratedInput ??= prepareActualGeneratedFixture();
+  const prepared = actualGeneratedInput;
+  const { raw, context, report } = prepared;
+  const manifest = structuredClone(prepared.manifest);
   const run = (input: unknown = manifest, selectedRoot = root) =>
     inspectSharedUnusedSemantics(
       selectedRoot,
@@ -503,67 +511,16 @@ constructorCases.push(
   },
 );
 for (const countercase of constructorCases)
-  test(`finite constructor mapping rejects ${countercase.name} with current physical owner SHA`, async () => {
+  test(`finite constructor mapping rejects ${countercase.name} with current physical owner SHA`, () => {
     const item = actualGeneratedFixture(),
       selectedRoot = item.physicalOwnerFixture();
     const file = path.join(selectedRoot, entrypointOwnerPaths[2]);
-    fs.writeFileSync(file, countercase.change(fs.readFileSync(file, "utf8")));
-    const actual = await item.actualPhysicalFactory(selectedRoot);
-    let loaderResult: { loaded: boolean; generatedValueSha256?: string; error?: string };
-    try {
-      loaderResult = {
-        loaded: true,
-        generatedValueSha256: new RuntimeFragmentLoader(selectedRoot).loadDefinitionWithProvenance(
-          actual,
-        ).entrypoint.sourceSha256,
-      };
-    } catch (error) {
-      loaderResult = { loaded: false, error: String(error) };
-    }
+    const original = fs.readFileSync(file, "utf8");
+    const changed = countercase.change(original);
+    expect(changed).not.toBe(original);
+    fs.writeFileSync(file, changed);
     item.refreshOwnerPins(selectedRoot);
-    let admissionError = "";
-    try {
-      item.run(undefined, selectedRoot);
-    } catch (error) {
-      admissionError = String(error);
-    }
-    expect(admissionError.length).toBeGreaterThan(0);
-    console.log(
-      "finiteConstructorCase",
-      JSON.stringify({
-        name: countercase.name,
-        currentConstructorSha256: readUnusedPhysicalSource(selectedRoot, entrypointOwnerPaths[2])
-          .sha256,
-        fields: {
-          name: actual.name ?? null,
-          outputFile:
-            typeof actual.outputFile === "string"
-              ? actual.outputFile
-              : { kind: typeof actual.outputFile },
-          fragments: Array.isArray(actual.fragments)
-            ? { kind: "array", length: actual.fragments.length }
-            : { kind: typeof actual.fragments },
-          entrypoint:
-            typeof actual.entrypoint === "string"
-              ? { kind: "string", length: actual.entrypoint.length }
-              : { kind: typeof actual.entrypoint },
-          bundledEntryPath:
-            actual.bundledEntryPath === null
-              ? null
-              : {
-                  kind: typeof actual.bundledEntryPath,
-                  length:
-                    typeof actual.bundledEntryPath === "string"
-                      ? actual.bundledEntryPath.length
-                      : 0,
-                },
-        },
-        presentProperties: constructorFields.filter((name) => Object.hasOwn(actual, name)),
-        loaderResult,
-        admissionError,
-        accepted: false,
-      }),
-    );
+    expect(() => item.run(undefined, selectedRoot)).toThrow();
   });
 
 test("real TypeScript 7 reference engine proves one exact UTF16 cross-fragment read without gate acceptance", () => {
