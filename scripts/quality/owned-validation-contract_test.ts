@@ -5,6 +5,7 @@ import {
   beforeEach,
   describe,
   expect,
+  setDefaultTimeout,
   spyOn,
   test,
 } from "bun:test";
@@ -58,8 +59,9 @@ import {
   NATIVE_WIDTH_HASH_INPUTS,
 } from "./owned-validation-contract";
 
-// WHY: 実リポジトリ全体の契約確認は、軽量fixtureとは別の実測に基づく上限で実行する。
+// 実Gitを使うfixtureはローカル実行で8秒近く要したため、既存の契約検査の上限を使う。
 const REPOSITORY_GRAPH_TEST_TIMEOUT_MS = 15_000;
+setDefaultTimeout(REPOSITORY_GRAPH_TEST_TIMEOUT_MS);
 
 const fixtures: string[] = [];
 let fixtureTemplate: string | undefined;
@@ -5722,7 +5724,7 @@ describe("host evidence registration mutations", () => {
   beforeAll(() => {
     const root = strictUnusedRegistrationFixture();
     expect(inspectMathJaxUnusedAuditRoute(root).binding.standardCommandVerified).toBe(true);
-  });
+  }, REPOSITORY_GRAPH_TEST_TIMEOUT_MS);
 
   test.each(hostEvidenceRecipeMutations)(
     "host evidence registration rejects %s",
