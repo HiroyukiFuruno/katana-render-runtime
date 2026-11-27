@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -18,33 +17,29 @@ export function record(file: string): FileRecord {
   return { path: canonical, sha256: fileSha256(canonical), size: fs.statSync(canonical).size };
 }
 
-function toolFileRecord(lookup: string, file: string): FileRecord {
-  if (!path.isAbsolute(file) || path.resolve(file) !== file)
-    throw new Error("MathJax executable path is not absolute and canonical");
-  const parent = path.dirname(file);
+export function mathJaxToolRecord(lookup: string): FileRecord {
   const selected = fs.statSync(lookup, { bigint: true });
-  const physical = fs.lstatSync(file, { bigint: true });
-  if (
-    !physical.isFile() ||
-    fs.realpathSync(parent) !== parent ||
-    selected.dev !== physical.dev ||
-    selected.ino !== physical.ino
-  )
-    throw new Error("MathJax executable does not match the selected regular file");
-  return { path: file, sha256: fileSha256(file), size: Number(physical.size) };
-}
-
-export function mathJaxToolRecords(node: string, lookups: string[]): FileRecord[] {
-  // Bun の実体パス解決は macOS で同じ inode の別名を返すことがある。
-  const resolveTools =
-    'const { realpathSync } = require("node:fs"); process.stdout.write(JSON.stringify(process.argv.slice(1).map(file => realpathSync(file))));';
-  const output = execFileSync(node, ["-e", resolveTools, "--", ...lookups], { encoding: "utf8" });
-  const files = z.array(z.string()).length(lookups.length).parse(JSON.parse(output));
-  return lookups.map((lookup, index) => {
-    const file = files[index];
-    if (file === undefined) throw new Error("MathJax executable path missing");
-    return toolFileRecord(lookup, file);
-  });
+  const visited = new Set<string>();
+  let candidate = lookup;
+  for (;;) {
+    // Bun はファイルを realpath すると macOS で別のハードリンク名を返すことがある。
+    const parent = fs.realpathSync(path.dirname(candidate));
+    const file = path.join(parent, path.basename(candidate));
+    const physical = fs.lstatSync(file, { bigint: true });
+    if (physical.isFile()) {
+      if (selected.dev !== physical.dev || selected.ino !== physical.ino)
+        throw new Error("MathJax executable does not match the selected regular file");
+      return { path: file, sha256: fileSha256(file), size: Number(physical.size) };
+    }
+    if (!physical.isSymbolicLink() || visited.has(file))
+      throw new Error("MathJax executable does not resolve to a regular file");
+    visited.add(file);
+    const target = fs.readlinkSync(file);
+    // 相対リンクを正規化すると、ディレクトリリンクを含む ../ の意味が変わる。
+    candidate = path.isAbsolute(target)
+      ? target
+      : `${parent}${parent.endsWith(path.sep) ? "" : path.sep}${target}`;
+  }
 }
 
 export function environment() {
@@ -129,7 +124,10 @@ export function inputs(root: string): FileRecord[] {
   const node = Bun.which("node");
   if (!bunx || !node) throw new Error("MathJax evidence requires actual bunx/node");
   const tools = new Map(
-    mathJaxToolRecords(node, [process.execPath, bunx, node]).map((entry) => [entry.path, entry]),
+    [process.execPath, bunx, node].map((lookup) => {
+      const entry = mathJaxToolRecord(lookup);
+      return [entry.path, entry];
+    }),
   );
   for (const name of ["bunfig.toml", ".npmrc"])
     if (fs.existsSync(path.join(root, name))) files.push(path.join(root, name));

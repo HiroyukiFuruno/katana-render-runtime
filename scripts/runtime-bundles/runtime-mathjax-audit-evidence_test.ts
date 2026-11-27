@@ -11,7 +11,7 @@ import {
 } from "./runtime-mathjax-audit-evidence";
 import {
   inputs,
-  mathJaxToolRecords,
+  mathJaxToolRecord,
   record,
   runtimeUnusedImportInputs,
   verifyMathJaxToolDependencies,
@@ -31,21 +31,25 @@ const objectsSchema = z.array(objectSchema);
 afterAll(() => fs.rmSync(directory, { recursive: true, force: true }));
 
 test("MathJax executable pins preserve distinct hard-link paths", () => {
-  const node = Bun.which("node");
-  if (!node) throw new Error("Node.js is required for MathJax evidence");
   const fixture = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "mathjax-tool-paths-")));
   try {
     const bun = path.join(fixture, "bun.exe");
     const bunx = path.join(fixture, "bunx.exe");
+    const absoluteAlias = path.join(fixture, "absolute.exe");
+    const relativeAlias = path.join(fixture, "relative.exe");
     const bytes = Buffer.from("executable fixture");
     fs.writeFileSync(bun, bytes);
     fs.linkSync(bun, bunx);
+    fs.symlinkSync(bun, absoluteAlias);
+    fs.symlinkSync(path.basename(bunx), relativeAlias);
     expect(fs.lstatSync(bun).ino).toBe(fs.lstatSync(bunx).ino);
     const identity = {
       sha256: createHash("sha256").update(bytes).digest("hex"),
       size: bytes.length,
     };
-    expect(mathJaxToolRecords(node, [bun, bunx])).toEqual([
+    expect([bun, bunx, absoluteAlias, relativeAlias].map(mathJaxToolRecord)).toEqual([
+      { ...identity, path: bun },
+      { ...identity, path: bunx },
       { ...identity, path: bun },
       { ...identity, path: bunx },
     ]);

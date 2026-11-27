@@ -3758,7 +3758,7 @@ const HOST_EVIDENCE_SOURCE_AST_SHA256: Record<string, string | readonly string[]
   "scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts":
     "4484139b289df41f69436936caa5a09477a132822f25b9c35dd68282332dadca",
   "scripts/runtime-bundles/runtime-mathjax-audit-evidence-inputs.ts":
-    "126ba52a36ba3dc819abdb98029ae7232f606b8fd7ee253861f1df622931f55e",
+    "8e3c0de23f105aa01b239c4a19435d3519b4a06aa729dcad76849d74024e0486",
   "scripts/runtime-bundles/runtime-unused-import-scan.ts":
     "fb40e604fd7b9063f066fd70f5029fec5210eac638a2f74b8777279a4d2c55c8",
   "scripts/runtime-bundles/runtime-mathjax-audit-evidence-producer.ts":
