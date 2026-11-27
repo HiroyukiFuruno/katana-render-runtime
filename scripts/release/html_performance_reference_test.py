@@ -159,7 +159,7 @@ class ActiveReferenceTest(unittest.TestCase):
             )
 
         invalid_policy_values: tuple[tuple[str, object], ...] = (
-            ("version", "html-memory-v7"),
+            ("version", "unsupported-memory-policy"),
             ("policySha256", "A" * 64),
             ("retentionEvidenceSha256", "bad"),
             ("candidateConditions", 83),
