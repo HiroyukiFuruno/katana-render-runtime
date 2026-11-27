@@ -340,13 +340,14 @@ test.each(["map", "sourceMapAsset", "modules"])(
   },
 );
 
-test.each(["package.json", "mjs/svg.js"])(
-  "actual NewCM font %s belongs to acquisition pins",
-  (relative) => {
+// 実依存ツリー全体のハッシュ取得は、ローカル実行で約9秒かかった。
+test("actual NewCM font metadata and SVG module belong to acquisition pins", () => {
+  const pins = inputs(root);
+  for (const relative of ["package.json", "mjs/svg.js"]) {
     const file = path.join(root, "node_modules/@mathjax/mathjax-newcm-font", relative);
-    expect(inputs(root)).toContainEqual(record(file));
-  },
-);
+    expect(pins).toContainEqual(record(file));
+  }
+}, 15_000);
 
 test.each(["package.json", "mjs/svg.js"])(
   "current evidence rejects omitted NewCM font %s acquisition pins",
