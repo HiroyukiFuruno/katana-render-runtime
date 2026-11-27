@@ -1,11 +1,14 @@
-import { expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { fileSha256 } from "./mermaid-pair-manifest";
 import { verifyNativeBuildReceipt } from "./native-build-receipt";
 import { createManagedReaderFixture } from "./native-cli-managed-build-test-fixture";
 
-function frozenIdentity(f: ReturnType<typeof createManagedReaderFixture>, name = "krr") {
+type Fixture = ReturnType<typeof createManagedReaderFixture>;
+type OriginState = "available" | "changed" | "missing";
+
+function frozenIdentity(f: Fixture, name: string) {
   const directory = path.join(path.dirname(f.receiptPath), "frozen");
   fs.mkdirSync(directory, { recursive: true });
   const binary = path.join(directory, name);
@@ -23,81 +26,96 @@ function frozenIdentity(f: ReturnType<typeof createManagedReaderFixture>, name =
   };
 }
 
-test("v4 keeps the selected Cargo proof while executing the retained copy", () => {
-  const f = createManagedReaderFixture();
-  try {
-    const frozen = frozenIdentity(f);
-    const receipt = {
-      ...f.receipt,
-      schema: "krr-native-cli-managed-build-v4",
-      frozenFrom: f.receipt.binary,
-      frozenBinary: frozen,
-    };
-    fs.writeFileSync(f.receiptPath, JSON.stringify(receipt));
-    expect(
-      verifyNativeBuildReceipt(f.receiptPath, frozen.path, f.runtimePath, f.root).binaryPath,
-    ).toBe(frozen.path);
-    fs.writeFileSync(f.binaryPath, "replaced origin");
-    expect(() =>
-      verifyNativeBuildReceipt(f.receiptPath, f.binaryPath, f.runtimePath, f.root),
-    ).toThrow();
-    expect(
-      verifyNativeBuildReceipt(f.receiptPath, frozen.path, f.runtimePath, f.root).binaryPath,
-    ).toBe(frozen.path);
-    fs.unlinkSync(f.binaryPath);
-    expect(
-      verifyNativeBuildReceipt(f.receiptPath, frozen.path, f.runtimePath, f.root).binaryPath,
-    ).toBe(frozen.path);
-  } finally {
-    fs.rmSync(f.root, { recursive: true, force: true });
+function withOrigin(f: Fixture, state: OriginState, check: () => void) {
+  if (state === "available") {
+    check();
+    return;
   }
-});
+  const original = `${f.binaryPath}.retained`;
+  fs.renameSync(f.binaryPath, original);
+  try {
+    if (state === "changed") fs.writeFileSync(f.binaryPath, "replaced origin");
+    check();
+  } finally {
+    fs.rmSync(f.binaryPath, { force: true });
+    fs.renameSync(original, f.binaryPath);
+  }
+}
 
-test("v4 rejects changed copy, unrelated path and altered origin", () => {
-  const f = createManagedReaderFixture();
-  const attempts = [
+function withFrozenReceipt(
+  f: Fixture,
+  variant: "bytes" | "path" | "origin" | "valid" | "legacy",
+  check: (retainedPath: string) => void,
+) {
+  const frozen = frozenIdentity(f, variant === "path" ? "other" : "krr");
+  try {
+    const origin =
+      variant === "origin" ? { ...f.receipt.binary, sha256: "0".repeat(64) } : f.receipt.binary;
+    const receipt =
+      variant === "legacy"
+        ? f.receipt
+        : {
+            ...f.receipt,
+            schema: "krr-native-cli-managed-build-v4",
+            frozenFrom: origin,
+            frozenBinary: frozen,
+          };
+    fs.writeFileSync(f.receiptPath, JSON.stringify(receipt));
+    if (variant === "bytes") {
+      fs.chmodSync(frozen.path, 0o755);
+      fs.writeFileSync(frozen.path, "changed");
+    }
+    check(frozen.path);
+  } finally {
+    fs.unlinkSync(frozen.path);
+  }
+}
+
+describe("managed native CLI frozen build receipts", () => {
+  let f: Fixture;
+  beforeAll(() => {
+    f = createManagedReaderFixture();
+  });
+  afterAll(() => {
+    if (f) fs.rmSync(f.root, { recursive: true, force: true });
+  });
+
+  const verify = (binary: string) =>
+    verifyNativeBuildReceipt(f.receiptPath, binary, f.runtimePath, f.root);
+
+  test.each(["available", "changed", "missing"] as const)(
+    "v4 retains the selected Cargo proof with the original %s",
+    (state) => {
+      withFrozenReceipt(f, "valid", (retained) => {
+        withOrigin(f, state, () => expect(verify(retained).binaryPath).toBe(retained));
+      });
+    },
+  );
+
+  test("v4 rejects executing the changed original in place of the retained copy", () => {
+    withFrozenReceipt(f, "valid", () => {
+      withOrigin(f, "changed", () => {
+        expect(() => verify(f.binaryPath)).toThrow(/request path\/deadline differs/);
+      });
+    });
+  });
+
+  test.each([
     ["bytes", /managed execution binary changed after its receipt was written/],
     ["path", /frozen binary identity differs/],
     ["origin", /frozen binary origin differs/],
-  ] as const;
-  try {
-    for (const [variant, expected] of attempts) {
-      const frozen = frozenIdentity(f, variant === "path" ? "other" : "krr");
-      const origin =
-        variant === "origin" ? { ...f.receipt.binary, sha256: "0".repeat(64) } : f.receipt.binary;
-      const receipt = {
-        ...f.receipt,
-        schema: "krr-native-cli-managed-build-v4",
-        frozenFrom: origin,
-        frozenBinary: frozen,
-      };
-      fs.writeFileSync(f.receiptPath, JSON.stringify(receipt));
-      if (variant === "bytes") {
-        fs.chmodSync(frozen.path, 0o755);
-        fs.writeFileSync(frozen.path, "changed");
-      }
-      expect(() =>
-        verifyNativeBuildReceipt(f.receiptPath, frozen.path, f.runtimePath, f.root),
-      ).toThrow(expected);
-      fs.unlinkSync(frozen.path);
-    }
-  } finally {
-    fs.rmSync(f.root, { recursive: true, force: true });
-  }
-});
+  ] as const)("v4 rejects tampering with %s", (variant, expected) => {
+    withFrozenReceipt(f, variant, (retained) => expect(() => verify(retained)).toThrow(expected));
+  });
 
-test("v3 still rejects a relocated binary and loss of its target path", () => {
-  const f = createManagedReaderFixture();
-  try {
-    const frozen = frozenIdentity(f);
-    expect(() =>
-      verifyNativeBuildReceipt(f.receiptPath, frozen.path, f.runtimePath, f.root),
-    ).toThrow();
-    fs.unlinkSync(f.binaryPath);
-    expect(() =>
-      verifyNativeBuildReceipt(f.receiptPath, f.binaryPath, f.runtimePath, f.root),
-    ).toThrow();
-  } finally {
-    fs.rmSync(f.root, { recursive: true, force: true });
-  }
+  test("v3 rejects executing a relocated binary", () => {
+    withFrozenReceipt(f, "legacy", (retained) => {
+      expect(() => verify(retained)).toThrow(/request path\/deadline differs/);
+    });
+  });
+  test("v3 rejects a missing original binary", () => {
+    withFrozenReceipt(f, "legacy", () => {
+      withOrigin(f, "missing", () => expect(() => verify(f.binaryPath)).toThrow(/ENOENT/));
+    });
+  });
 });
