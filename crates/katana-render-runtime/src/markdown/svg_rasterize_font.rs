@@ -157,21 +157,18 @@ mod tests {
     use resvg::usvg;
 
     #[test]
-    fn bundled_font_databases_use_the_embedded_bytes_without_copying() -> Result<(), &'static str> {
+    fn bundled_font_databases_use_the_embedded_bytes_without_copying() {
         let database = bundled_font_db();
-        let face = database.faces().next().ok_or("bundled font unavailable")?;
-        let (usvg::fontdb::Source::Binary(svg), _) = database
-            .face_source(face.id)
-            .ok_or("bundled font source unavailable")?
-        else {
-            return Err("expected a binary SVG font source");
-        };
-        let usvg::fontdb::Source::Binary(html) = bundled_font_source() else {
-            return Err("expected a binary HTML font source");
-        };
-        assert!(Arc::ptr_eq(&svg, &html));
-        assert!(std::ptr::eq(svg.as_ref().as_ref(), BUNDLED_SANS_SERIF_FONT));
-        Ok(())
+        let source = database
+            .faces()
+            .next()
+            .and_then(|face| database.face_source(face.id));
+        assert!(matches!(
+            (source, bundled_font_source()),
+            (Some((usvg::fontdb::Source::Binary(svg), _)), usvg::fontdb::Source::Binary(html))
+                if Arc::ptr_eq(&svg, &html)
+                    && std::ptr::eq(svg.as_ref().as_ref(), BUNDLED_SANS_SERIF_FONT)
+        ));
     }
 
     #[test]

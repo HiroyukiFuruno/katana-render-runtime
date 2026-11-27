@@ -206,10 +206,10 @@ mod tests {
     }
 
     #[test]
-    fn fontconfig_uses_the_default_temporary_font_object_scope() {
+    fn fontconfig_uses_the_default_html_font_frame_scope() {
         let strategy = FontconfigFonts;
         let calls = std::cell::Cell::new(0);
-        let result = strategy.with_temporary_font_objects(|| {
+        let result = strategy.with_html_font_frame(|| {
             calls.set(calls.get() + 1);
             "completed"
         });
