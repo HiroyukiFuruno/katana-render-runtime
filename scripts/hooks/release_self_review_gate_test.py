@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import cast
 import unittest
 from unittest import mock
 
@@ -51,6 +53,36 @@ class ReleaseSelfReviewGateTest(unittest.TestCase):
     def verify(self, thread: str = THREAD) -> None:
         verify_release_review(self.root, self.home, thread)
 
+    def add_minimum_reproduction(self, *, input_digest: str = "b" * 64,
+                                 record_update: dict[str, object] | None = None,
+                                 log: bytes = b"minimum reproduction\n") -> None:
+        evidence = self.root / "tmp" / "minimum-reproduction"
+        evidence.mkdir(parents=True, exist_ok=True)
+        log_path = evidence / "stdout.log"
+        log_path.write_bytes(log)
+        record = {
+            "exit_code": 0,
+            "command": ["just", "automation-validation-timing-test"],
+            "cwd": str(self.root),
+            "input_digest": input_digest,
+            "head_at_start": HEAD,
+            "head_at_end": HEAD,
+            "dirty_at_start": False,
+        }
+        if record_update:
+            record.update(record_update)
+        record_path = evidence / "exit.json"
+        record_path.write_text(json.dumps(record), encoding="utf-8")
+        self.review["heavy_failure"] = {
+            "input_digest": input_digest,
+            "minimum_reproduction": {
+                "record": str(record_path.relative_to(self.root)),
+                "log": str(log_path.relative_to(self.root)),
+                "log_sha256": hashlib.sha256(log).hexdigest(),
+            },
+        }
+        self.write_ledger()
+
     def test_reviewed_release_can_run_while_later_checks_are_pending(self) -> None:
         self.verify()
         self.assertEqual(self.git.call_count, 3)
@@ -89,6 +121,52 @@ class ReleaseSelfReviewGateTest(unittest.TestCase):
                 self.git.side_effect = ["release/v0.4.24\n", actual_head + "\n", status]
                 with self.assertRaisesRegex(ReviewError, message):
                     self.verify()
+
+    def test_heavy_failure_requires_current_clean_minimum_reproduction(self) -> None:
+        self.add_minimum_reproduction()
+        self.verify()
+
+        cases: tuple[tuple[dict[str, object], str], ...] = (
+            ({"exit_code": 1}, "現在のclean HEAD"),
+            ({"exit_code": False}, "現在のclean HEAD"),
+            ({"command": []}, "現在のclean HEAD"),
+            ({"cwd": str(self.home)}, "現在のclean HEAD"),
+            ({"input_digest": "c" * 64}, "現在のclean HEAD"),
+            ({"head_at_start": "d" * 40}, "現在のclean HEAD"),
+            ({"head_at_end": "e" * 40}, "現在のclean HEAD"),
+            ({"dirty_at_start": True}, "現在のclean HEAD"),
+        )
+        for update, message in cases:
+            with self.subTest(update=update):
+                self.add_minimum_reproduction(record_update=update)
+                self.git.side_effect = ["release/v0.4.24\n", HEAD + "\n", ""]
+                with self.assertRaisesRegex(ReviewError, message):
+                    self.verify()
+
+    def test_heavy_failure_rejects_invalid_or_changed_evidence(self) -> None:
+        self.add_minimum_reproduction()
+        failure = cast(dict[str, object], self.review["heavy_failure"])
+        reproduction = cast(dict[str, str], failure["minimum_reproduction"])
+        log = self.root / reproduction["log"]
+        log.write_text("changed\n", encoding="utf-8")
+        with self.assertRaisesRegex(ReviewError, "ログhashが一致しません"):
+            self.verify()
+
+        self.review["heavy_failure"] = {"input_digest": "b" * 64}
+        self.write_ledger()
+        self.git.side_effect = ["release/v0.4.24\n", HEAD + "\n", ""]
+        with self.assertRaisesRegex(ReviewError, "重い失敗の記録が不正です"):
+            self.verify()
+
+    def test_heavy_failure_rejects_linked_evidence_with_unchanged_content(self) -> None:
+        self.add_minimum_reproduction()
+        failure = cast(dict[str, object], self.review["heavy_failure"])
+        reproduction = cast(dict[str, str], failure["minimum_reproduction"])
+        log = self.root / reproduction["log"]
+        original = log.rename(log.with_suffix(".original"))
+        log.symlink_to(original)
+        with self.assertRaisesRegex(ReviewError, "通常ファイルではありません"):
+            self.verify()
 
     def test_rejects_missing_or_ambiguous_release_review(self) -> None:
         for tasks in ([], [self.review, self.review]):
