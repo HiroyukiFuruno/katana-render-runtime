@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect, setDefaultTimeout, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { createContext, runInContext } from "node:vm";
@@ -41,6 +41,9 @@ import {
   semanticContextPin,
   sharedUnusedSemanticPoint,
 } from "./runtime-unused-semantic-adapter";
+
+// 実TypeScriptと生成済みバンドルの読み直しを含む契約検査の実行上限。
+setDefaultTimeout(30_000);
 
 const root = fs.realpathSync(process.cwd());
 const evidence = path.join(
