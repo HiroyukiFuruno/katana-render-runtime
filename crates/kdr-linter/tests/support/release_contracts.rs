@@ -874,6 +874,7 @@ fn assert_moon_quality_dag(moon: &str, scheduler: &str, moon_workspace: &str) {
             "  coverage:\n    command: ['just', 'coverage-result-check']\n    deps: ['unit-test']",
             "  unit-test:\n    command: ['just', 'root-test-and-coverage']\n    deps: ['performance-coverage']",
             "  check:\n    command: noop\n    inputs: *quality-inputs\n    deps:\n      - heavy-native\n      - runtime-asset-script-test\n      - automation-contract-test\n      - build-capacity-check",
+            "  automation-performance-bootstrap-test:\n    command: ['just', 'automation-performance-bootstrap-test']\n    deps: ['static', 'runtime-asset-script-preflight']",
         ],
     );
     assert!(moon.contains(
@@ -881,7 +882,6 @@ fn assert_moon_quality_dag(moon: &str, scheduler: &str, moon_workspace: &str) {
     ));
     for task in [
         "automation-hooks-test",
-        "automation-performance-bootstrap-test",
         "automation-quality-test",
         "automation-mermaid-test",
         "automation-validation-timing-test",
