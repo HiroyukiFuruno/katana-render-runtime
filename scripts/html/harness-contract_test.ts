@@ -4043,11 +4043,15 @@ function bypassPerformanceCoverageWrapper(snapshot: HarnessSnapshot): void {
   );
 }
 
-test.each(combinedCoverageFaults)("combined coverage contract rejects %s", (_fault, mutate) => {
-  const snapshot = combinedCoverageMoonFixture();
-  mutate(snapshot);
-  expect(checkHarnessContract(snapshot).length).toBeGreaterThan(0);
-});
+test.each(combinedCoverageFaults)(
+  "combined coverage contract rejects %s",
+  (_fault, mutate) => {
+    const snapshot = combinedCoverageMoonFixture();
+    mutate(snapshot);
+    expect(checkHarnessContract(snapshot).length).toBeGreaterThan(0);
+  },
+  REPOSITORY_GRAPH_TEST_TIMEOUT_MS,
+);
 
 test.each([
   ["CARGO override", "CARGO={{quote(CARGO)}}", "CARGO=cargo"],
@@ -4242,6 +4246,7 @@ test.each(["missing", "ignored"])(
       "performance collection authentication differs",
     );
   },
+  REPOSITORY_GRAPH_TEST_TIMEOUT_MS,
 );
 
 test.each(["root before performance", "artifact producer after root"])(
