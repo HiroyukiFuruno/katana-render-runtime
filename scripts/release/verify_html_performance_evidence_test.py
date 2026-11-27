@@ -52,16 +52,20 @@ JsonMutation = Callable[[JsonObject], None]
 
 
 class Issue126ReleaseExceptionIntegrationTest(unittest.TestCase):
+    def make_bundle(self, temporary: str) -> Bundle:
+        bundle_path = Path(temporary).resolve()
+        (bundle_path / "bundle.json").write_text(json.dumps({
+            "schema": "krr-html-performance-release-bundle-v1",
+            "head": "d40d53daf9287f668e0f93ce1c11124658cc234a",
+            "files": [],
+        }))
+        return gate.Bundle(bundle_path)
+
     def test_v7_policy_exception_receives_only_authenticated_inputs(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory() as temporary:
-            bundle_path = Path(temporary).resolve()
-            (bundle_path / "bundle.json").write_text(json.dumps({
-                "schema": "krr-html-performance-release-bundle-v1",
-                "head": "d40d53daf9287f668e0f93ce1c11124658cc234a",
-                "files": [],
-            }))
-            bundle = gate.Bundle(bundle_path)
+            bundle = self.make_bundle(temporary)
+            bundle_path = bundle.directory
             expected: JsonObject = {"catalogCondition": {
                 "condition_id": "events/expected-state/620x900@1",
             }}
@@ -89,13 +93,8 @@ class Issue126ReleaseExceptionIntegrationTest(unittest.TestCase):
     def test_exception_is_disclosed_and_false_does_not_weaken_v7(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory() as temporary:
-            bundle_path = Path(temporary).resolve()
-            (bundle_path / "bundle.json").write_text(json.dumps({
-                "schema": "krr-html-performance-release-bundle-v1",
-                "head": "d40d53daf9287f668e0f93ce1c11124658cc234a",
-                "files": [],
-            }))
-            bundle = gate.Bundle(bundle_path)
+            bundle = self.make_bundle(temporary)
+            bundle_path = bundle.directory
             expected: JsonObject = {
                 "catalogCondition": {"condition_id": "events/expected-state/620x900@1"},
                 "memoryRetentionRef": {"sha256": "a" * 64},
