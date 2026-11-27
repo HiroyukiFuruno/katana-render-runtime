@@ -22,7 +22,7 @@ fn release_check_requires_all_quality_and_publish_readiness_gates()
             "release-check must require {required_gate}"
         );
     }
-    for required_gate in ["check", "html-performance-nonregression-check"] {
+    for required_gate in ["check", "html-performance-publication-check"] {
         assert!(
             quality.contains(required_gate),
             "release-quality must require {required_gate}"
