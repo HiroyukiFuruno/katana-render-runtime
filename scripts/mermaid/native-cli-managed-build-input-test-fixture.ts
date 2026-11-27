@@ -8,6 +8,14 @@ import { writeFile } from "./native-classic-capture-test-fixture";
 import { managedOwnedSchema } from "./native-cli-managed-build-schema";
 import { managedControlNames } from "./native-cli-managed-inputs";
 
+function toolPin(file: string) {
+  const canonicalPath = fs.realpathSync(file);
+  const raw = fs.readFileSync(canonicalPath);
+  return { path: canonicalPath, sha256: sha256(raw), size: raw.length };
+}
+
+let runningBunPin: ReturnType<typeof toolPin> | undefined;
+
 function inventory(source: string, name: string): string[] {
   const block = source.match(new RegExp(`const ${name} = \\[([\\s\\S]*?)\\];`));
   if (block?.[1] === undefined) throw new Error("Managed reader fixture inventory is absent");
@@ -97,7 +105,7 @@ export function createManagedReaderInputs(withJustDispatcher = false) {
   );
   const main = save("crates/katana-render-runtime-cli/src/main.rs", "fn main() {}\n");
   const runtime = save("runtime.js", "unit runtime data");
-  execFileSync("git", ["init", "--quiet"], { cwd: root });
+  execFileSync("git", ["init", "--quiet", "--template="], { cwd: root });
   execFileSync("git", ["add", "."], { cwd: root });
   const names = execFileSync("git", ["ls-files", "-z"], { cwd: root })
     .toString()
@@ -128,12 +136,10 @@ export function createManagedReaderInputs(withJustDispatcher = false) {
     .map((base) => path.join(base, "python3"))
     .find((file) => fs.existsSync(file) && (fs.statSync(file).mode & 0o111) !== 0);
   if (python === undefined) throw new Error("Unit PATH python3 unavailable");
-  const toolPin = (file: string) => {
-    const raw = fs.readFileSync(fs.realpathSync(file));
-    return { path: fs.realpathSync(file), sha256: sha256(raw), size: raw.length };
-  };
   tools.python3 = toolPin(python);
-  tools.bun = toolPin(process.execPath);
+  // 起動済みBunの期待値だけを共有し、検証側は毎回実ファイルを読み直す。
+  runningBunPin ??= toolPin(process.execPath);
+  tools.bun = { ...runningBunPin };
   tools.lsof = toolPin(process.platform === "darwin" ? "/usr/sbin/lsof" : "/usr/bin/lsof");
   const git = process.env.PATH?.split(path.delimiter)
     .map((base) => path.join(base, "git"))

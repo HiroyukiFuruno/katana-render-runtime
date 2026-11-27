@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, setDefaultTimeout, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
@@ -16,6 +16,9 @@ import { verifyManagedCapacity } from "./native-cli-managed-cargo";
 import { managedControlNames, parseManagedControlManifest } from "./native-cli-managed-inputs";
 import { parseManagedJson } from "./native-cli-managed-json";
 import { read } from "./native-cli-managed-process";
+
+// 一部のケースは実Gitで正常系と改変後を照合し、ローカル観測で10秒を超えた。
+setDefaultTimeout(15_000);
 
 type Fixture = ReturnType<typeof createManagedReaderFixture>;
 const controlManifest = {
