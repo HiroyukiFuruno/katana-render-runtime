@@ -11,6 +11,7 @@ import {
 } from "./runtime-mathjax-audit-evidence";
 import {
   inputs,
+  mathJaxToolRecords,
   record,
   runtimeUnusedImportInputs,
   verifyMathJaxToolDependencies,
@@ -28,6 +29,30 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mathjax-evidence-contra
 const objectSchema = z.record(z.string(), z.unknown());
 const objectsSchema = z.array(objectSchema);
 afterAll(() => fs.rmSync(directory, { recursive: true, force: true }));
+
+test("MathJax executable pins preserve distinct hard-link paths", () => {
+  const node = Bun.which("node");
+  if (!node) throw new Error("Node.js is required for MathJax evidence");
+  const fixture = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "mathjax-tool-paths-")));
+  try {
+    const bun = path.join(fixture, "bun.exe");
+    const bunx = path.join(fixture, "bunx.exe");
+    const bytes = Buffer.from("executable fixture");
+    fs.writeFileSync(bun, bytes);
+    fs.linkSync(bun, bunx);
+    expect(fs.lstatSync(bun).ino).toBe(fs.lstatSync(bunx).ino);
+    const identity = {
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      size: bytes.length,
+    };
+    expect(mathJaxToolRecords(node, [bun, bunx])).toEqual([
+      { ...identity, path: bun },
+      { ...identity, path: bunx },
+    ]);
+  } finally {
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
+});
 
 test("definitions import scan resolves the real aliases without external packages", () => {
   const inputs = runtimeUnusedImportScan(
