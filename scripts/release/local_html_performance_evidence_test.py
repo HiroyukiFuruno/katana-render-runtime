@@ -9,6 +9,7 @@ import time
 import unittest
 from unittest.mock import patch
 
+from html_performance_memory_policy import CURRENT_ACCEPTANCE_POLICY_VERSION
 import local_html_performance_evidence as proof
 import html_performance_source_reuse_cli as reuse_cli
 import local_macos_evidence as mac
@@ -26,7 +27,7 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
             "bundle_manifest_sha256": "d" * 64, "result_sha256": "e" * 64,
             "conditions": 84, "candidate_conditions": 84, "checks": 1680,
             "formal_pass": True, "platform": "macos-arm64", "os_version": "27.2",
-            "memory_policy_version": "html-memory-v6",
+            "memory_policy_version": CURRENT_ACCEPTANCE_POLICY_VERSION,
             "tools": {"python": "3.13.0", "scipy": "1.18.1", "runtime_sha256": "f" * 64}}
         self.comment: dict[str, object] = {"body": proof.MARKER + "\n" + json.dumps(self.payload),
                         "user": {"login": "owner"}, "author_association": "OWNER",
@@ -41,7 +42,7 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
         for key, bad in (("head_sha", "f" * 40), ("base_sha", "f" * 40),
                          ("conditions", 83), ("candidate_conditions", 83),
                          ("checks", 1), ("formal_pass", False), ("scope_sha256", "0" * 64), ("os_version", "invalid"),
-                         ("memory_policy_version", "html-memory-v4"),
+                         ("memory_policy_version", "html-memory-v6"),
                          ("tools", {"python": "3", "scipy": "wrong", "runtime_sha256": "f" * 64})):
             payload = {**self.payload, key: bad}
             comment = {**self.comment, "body": proof.MARKER + "\n" + json.dumps(payload)}
@@ -111,15 +112,20 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
         paired = workflow_job(workflow, "paired-performance")
         steps = {step.get("name"): step for step in workflow_steps(paired)}
         self.assertEqual(steps["Verify optional local HTML performance evidence"].get("continue-on-error"), "true")
+        require_performance = "steps.source.outputs.version != '0.4.24'"
         self.assertEqual(steps["Verify optional local HTML performance evidence"].get("if"),
-                         "github.event_name == 'pull_request' || github.ref == 'refs/heads/master'")
+                         require_performance +
+                         " && (github.event_name == 'pull_request' || github.ref == 'refs/heads/master')")
         self.assertIn('--verify-merged-head "$GITHUB_SHA"', paired)
         expected = "steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'"
-        for name in ("Install Rust toolchain", "Capture all 84 HTML catalog conditions",
-                     "Measure all 84 catalog conditions against baseline",
+        for name in ("Install Rust toolchain", "Capture all 84 HTML catalog conditions"):
+            self.assertEqual(steps[name].get("if"), expected)
+        for name in ("Measure all 84 catalog conditions against baseline",
                      "Upload immutable source and run bound paired evidence",
                      "Attest immutable paired performance artifact"):
-            self.assertEqual(steps[name].get("if"), expected)
+            self.assertEqual(steps[name].get("if"), f"{require_performance} && ({expected})")
+        self.assertEqual(steps["Verify all 84 HTML images and font identities for v0.4.24"].get("if"),
+                         "steps.source.outputs.version == '0.4.24'")
         self.assertIn("needs: [test, paired-performance]", workflow_job(workflow, "preflight"))
 
     def test_merged_proof_reuses_the_exact_binding_and_host_policy(self) -> None:
@@ -174,7 +180,7 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "failed"):
                 proof.collect("owner/repo", 3, Path("/unused"))
             verifier.assert_called_once_with(Path("/unused"), mac.ROOT,
-                                              memory_policy_version="html-memory-v6")
+                                              memory_policy_version=CURRENT_ACCEPTANCE_POLICY_VERSION)
             self.assertTrue(all(call.args[1] != "POST" for call in api.call_args_list))
 
     def test_collector_requires_current_memory_policy_for_fresh_and_rejects_legacy_results(self) -> None:
@@ -182,7 +188,7 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
         from pathlib import Path
         formal: dict[str, object] = {
             "head": "c" * 40, "conditions": 84, "candidateConditions": 84,
-            "checks": 1680, "memoryPolicyVersion": "html-memory-v6",
+            "checks": 1680, "memoryPolicyVersion": CURRENT_ACCEPTANCE_POLICY_VERSION,
             "retainedMemoryConditions": 84, "memoryPolicyAssessments": [{}] * 84,
         }
         with ExitStack() as stack:
@@ -211,16 +217,16 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
                 gate, "_require_cli_current_memory", wraps=gate._require_cli_current_memory))
             proof.collect("owner/repo", 3, Path("/unused"))
             verify.assert_called_once_with(Path("/unused"), mac.ROOT,
-                                           memory_policy_version="html-memory-v6")
+                                           memory_policy_version=CURRENT_ACCEPTANCE_POLICY_VERSION)
             require_current.assert_called_once_with(formal, reused=False)
 
-        with self.assertRaisesRegex(ValueError, "v6 retained memory"):
+        with self.assertRaisesRegex(ValueError, "retained memory"):
             gate._require_cli_current_memory({}, reused=False)
         legacy: gate.JsonObject = {
-            "memoryPolicyVersion": "html-memory-v3", "retainedMemoryConditions": 84,
+            "memoryPolicyVersion": "html-memory-v6", "retainedMemoryConditions": 84,
             "memoryPolicyAssessments": [{}] * 84,
         }
-        with self.assertRaisesRegex(ValueError, "v6 retained memory"):
+        with self.assertRaisesRegex(ValueError, "retained memory"):
             gate._require_cli_current_memory(legacy, reused=False)
 
     def test_reuse_projection_binds_measured_result_and_eligibility(self) -> None:
@@ -230,7 +236,7 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
         old, head = "a" * 40, "c" * 40
         formal: dict[str, object] = {"head": old, "conditions": 84,
                                       "candidateConditions": 84, "checks": 1680,
-                                      "memoryPolicyVersion": "html-memory-v6",
+                                      "memoryPolicyVersion": CURRENT_ACCEPTANCE_POLICY_VERSION,
                                       "retainedMemoryConditions": 84,
                                       "memoryPolicyAssessments": [{}] * 84}
         reused: dict[str, object] = {"measuredHead": old, "eligibleHead": head,
@@ -265,7 +271,7 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
             verify.assert_called_with(request, mac.ROOT, expected_measured_dir=measured,
                                       expected_measured_manifest_sha256="f" * 64,
                                       expected_request_sha256="f" * 64,
-                                      memory_policy_version="html-memory-v6")
+                                      memory_policy_version=CURRENT_ACCEPTANCE_POLICY_VERSION)
             require_current.assert_called_with(formal, reused=False)
             reused["reuseKind"] = "program-source-artifact-equivalence-v1"
             self.assertEqual(proof.collect("owner/repo", 3, measured, request)["verification_kind"],

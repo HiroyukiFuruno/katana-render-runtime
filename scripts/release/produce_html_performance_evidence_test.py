@@ -31,6 +31,7 @@ from types import FrameType
 import psutil
 import html_performance_frozen_binary as binary_freeze
 from html_performance_host_load_test_support import cpu_times
+from html_performance_memory_policy import CURRENT_ACCEPTANCE_POLICY_VERSION
 import produce_html_performance_evidence as typed_producer
 import html_performance_host_load as host_load
 import html_performance_host_load_validation as load_validation
@@ -351,7 +352,7 @@ class CatalogProducerOperationTest(unittest.TestCase):
             self.assertIs(caught.exception, marker)
             make_query.assert_called_once_with(root / "tmp/output.lifecycle", scratch_root=root / "tmp")
             load.assert_called_once_with(batch.resolve(), root, fixed_epoch=origin, git_query=query,
-                                         memory_policy_version="html-memory-v6",
+                                     memory_policy_version=CURRENT_ACCEPTANCE_POLICY_VERSION,
                                          accepted_condition_ids_sink=ANY)
             self.assertIs(verify.call_args.kwargs["git_query"], query)
 
@@ -1933,7 +1934,7 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
 
         self.assertEqual(events, ["verify", "seal"])
         verify.assert_called_once_with(self.root / "bundle", self.root, git_query=None,
-                                       memory_policy_version="html-memory-v6")
+                                           memory_policy_version=CURRENT_ACCEPTANCE_POLICY_VERSION)
         validate.assert_not_called()
 
     def test_fixed_epoch_does_not_claim_formal_acceptance_without_current_build(self) -> None:

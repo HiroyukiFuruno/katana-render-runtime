@@ -615,14 +615,18 @@ class ReleaseCompletionRoutingTest(unittest.TestCase):
         self.assertIn("  contents: write\n", permissions)
         self.assertIn("  pull-requests: read\n", permissions)
 
-    def test_both_performance_gates_remain_mandatory(self) -> None:
+    def test_release_recipes_enforce_version_scoped_performance_gate(self) -> None:
         justfile = (self.root / "Justfile").read_text()
         for recipe in ("release-verify", "release-quality"):
             with self.subTest(recipe=recipe):
                 self.assertRegex(
                     justfile,
-                    rf"(?m)^{recipe}:[^\n]*[ \t]html-performance-nonregression-check(?:[ \t]|$)",
+                    rf"(?m)^{recipe}:[^\n]*[ \t]html-performance-publication-check(?:[ \t]|$)",
                 )
+        self.assertIn('HTML_PERFORMANCE_PUBLICATION_PAUSED_VERSION := "0.4.24"', justfile)
+        recipe_body = justfile.split("\nhtml-performance-publication-check:\n", 1)[1].split("\n\n", 1)[0]
+        self.assertIn('bash scripts/release/verify-version.sh "{{VERSION}}"', recipe_body)
+        self.assertIn("else \\\n      just html-performance-nonregression-check", recipe_body)
 
 
 if __name__ == "__main__":
