@@ -180,9 +180,11 @@ def main() -> int:
     args, arguments = parser.parse_known_args()
     if args.capture_launch_environment or args.replay_launch_environment or args.replay_launch_environment_sha256:
         parser.error("launch environment options require --bootstrap")
-    if args.reuse_release_tests and (args.mode != "test" or arguments):
-        parser.error("--reuse-release-tests requires the complete test suite")
-    return run_mode(args.mode, arguments, reuse_release_tests=args.reuse_release_tests)
+    if args.reuse_release_tests:
+        if args.mode != "test" or arguments:
+            parser.error("--reuse-release-tests requires the complete test suite")
+        return run_mode("test", (), reuse_release_tests=True)
+    return run_mode(args.mode, arguments)
 
 
 if __name__ == "__main__":

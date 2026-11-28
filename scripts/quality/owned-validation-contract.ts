@@ -1293,7 +1293,7 @@ function pythonStatic(context: ContractContext, name: string): void {
 const HTML_PERFORMANCE_TEST_WRAPPER = "scripts/release/run_html_performance.py";
 const HTML_PERFORMANCE_TEST_SOURCES = {
   [HTML_PERFORMANCE_TEST_WRAPPER]:
-    "8f48ccd810ae4bf429b0ec0e18aeb2fa7b6e6836afa3e5841cb6a82c3bcb9f9e",
+    "13e9f71855af293f19d033ef6cb3fbf6e30fcd74c8c8346b19e82d6b78f361f2",
   "scripts/release/automation_release_test_cache.py":
     "e9c407f71a378f7c6c7af201a8f8e185737317a41b2f24a457ca0fa052e5c950",
   "scripts/release/automation_release_test_cases.py":
