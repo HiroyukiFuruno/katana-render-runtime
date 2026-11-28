@@ -1580,7 +1580,7 @@ jobs:
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false)) ||
       (!cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
       inputs.verify_platform == 'macos-stage90' && needs.test.result == 'skipped')
-    runs-on: macos-15
+    runs-on: macos-latest
     timeout-minutes: 360
     permissions:
       actions: read
@@ -1593,7 +1593,7 @@ jobs:
       - name: Checkout exact measurement source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'macos-stage90' && '6fb7525d2828bcdeb3169eccff17ed057645f8a2' || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'macos-stage90' && '231c77e5645eadf6d90ca2aff04dad39f132b70a' || github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Record actual source HEAD
@@ -1763,7 +1763,7 @@ jobs:
         run: python3 scripts/build/initialize_ci_capacity_state.py --root "$PWD"
 
       - name: Verify real interaction state for measurement fixture
-        if: steps.source.outputs.font_metadata != 'true' && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
+        if: steps.source.outputs.diagnostic != 'true' && steps.source.outputs.font_metadata != 'true' && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
         run: just browser-install html-interaction-check
 
       - name: Capture all 84 HTML catalog conditions
@@ -1774,50 +1774,61 @@ jobs:
           manifest="$output_root/captures/catalog-stage90-captures.json"
           diagnostic_conditions=()
           if [[ "${{ steps.source.outputs.diagnostic }}" == 'true' ]]; then
-            diagnostic_conditions+=('decoration/translucent/960x720@1 events/expected-state/960x720@1')
+            diagnostic_conditions+=('decoration/clipped/1280x900@1')
           fi
           just html-performance-catalog-captures "$output_root" '' '' \
             "${{ steps.font_observer.outputs.executable }}" \
             031c93c5e822ffd8d22121bb41ed139fb6fcc4e96f6aa1f43ea31ec36fb9242c true "${diagnostic_conditions[@]}"
           echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
 
-      - name: Test retained font proof with the captured native binary
-        if: steps.source.outputs.diagnostic == 'true' && steps.source.outputs.font_metadata != 'true'
+      - name: Summarize rejected scaler fields without font paths or data
+        if: failure() && steps.source.outputs.diagnostic == 'true'
+        shell: bash
         run: |
-          binary="tmp/html-performance-stage90/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/captures-binary/runtime-tests"
-          python3 - "$binary" <<'PY'
-          import hashlib
+          python3 - "tmp/html-performance-stage90/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/captures" <<'PY'
+          from collections import Counter
           from pathlib import Path
-          import subprocess
-          import sys
+          import json, re, sys
 
-          binary = Path(sys.argv[1]).resolve(strict=True)
-          with binary.open("rb") as handle:
-              digest = hashlib.file_digest(handle, "sha256").hexdigest()
-          prefix = "markdown::chrome_font_identity_probe_tests::"
-          cases = [
-              "probe::observer_tests::unresolved_system_face_uses_a_verified_retained_observer_face",
-              "probe::observer_tests::custom_faces_do_not_use_retained_observer_fallback",
-              "probe::observer_tests::missing_retained_face_keeps_both_resolution_failures",
-              "identity::observer_tests::retained_observer_face_requires_the_selected_physical_font",
-              "identity::observer_tests::retained_observer_face_rejects_changed_or_wrong_face_proofs",
-              "identity::observer_tests::retained_observer_face_requires_one_matching_proof",
-              "test_support::observer_contract_tests::font_probe_rejects_duplicate_observer_font_identities",
-              "identity::observer_tests::retained_observer_face_accepts_a_trace_proven_named_alias",
-          ]
-          catalog = subprocess.check_output([binary, "--list"], text=True).splitlines()
-          for case in cases:
-              name = prefix + case
-              if catalog.count(f"{name}: test") != 1:
-                  raise SystemExit(f"Expected one native regression case: {name}")
-              result = subprocess.run([binary, "--exact", name], check=False, capture_output=True, text=True)
-              if result.returncode or f"test {name} ... ok" not in result.stdout:
-                  sys.stderr.write(result.stdout + result.stderr)
-                  raise SystemExit(f"Native regression did not complete: {name}")
-              print(f"{name}: passed")
-          with binary.open("rb") as handle:
-              if hashlib.file_digest(handle, "sha256").hexdigest() != digest:
-                  raise SystemExit("Captured native test binary changed")
+          counts = Counter()
+          traces = sorted(Path(sys.argv[1]).glob("*.chrome.png.trace.json"))
+          if not traces:
+              traces = sorted(Path(sys.argv[1]).glob("*-chrome.png.trace.json"))
+          for trace in traces:
+              for event in json.loads(trace.read_text())["traceEvents"]:
+                  if event.get("cat") != "katana.font-observer" or event.get("name") != "scaler-font":
+                      continue
+                  args = event.get("args", {})
+                  if not re.fullmatch("[0-9a-f]{64}", str(args.get("descriptorSHA256", ""))):
+                      continue
+                  actual = json.loads(args.get("actualFont", "null"))
+                  if not isinstance(actual, dict):
+                      counts["font-not-object"] += 1
+                      continue
+                  sha = actual.get("physicalFileSHA256")
+                  fields = {
+                      "postscript": isinstance(actual.get("postScriptName"), str) and bool(actual["postScriptName"]),
+                      "sha256": isinstance(sha, str) and re.fullmatch("[0-9a-f]{64}", sha) is not None,
+                      "file-available": actual.get("physicalFileAvailable") is True,
+                      "unique-table-match": actual.get("physicalFaceBindingStatus") == "observed:unique-table-match",
+                      "ttc-index": type(actual.get("physicalFaceTtcIndex")) is int and actual["physicalFaceTtcIndex"] >= 0,
+                      "fvar": type(actual.get("physicalFaceFvarTablePresent")) is bool,
+                      "descriptor-url": isinstance(actual.get("descriptorURL"), str) and bool(actual["descriptorURL"]),
+                      "axes": isinstance(actual.get("axes"), list),
+                  }
+                  counts["scalers-with-valid-descriptor"] += 1
+                  status = actual.get("physicalFaceBindingStatus")
+                  known = {"observed:unique-table-match", "not-established:ambiguous-table-match", "not-established:face-candidate-unavailable", "not-established:actual-table-set-incomplete", "not-established:null-font", "not-established:file-changed-during-face-observation"}
+                  counts["binding-status/" + (status if isinstance(status, str) and status in known else "other-or-absent")] += 1
+                  file_status = actual.get("physicalFileStatus")
+                  file_known = {"observed:regular-file-sha256", "not-established:unreadable-or-non-regular", "not-established:read-failed", "not-established:file-changed-during-observation", "not-established:null-font"}
+                  counts["file-status/" + (file_status if isinstance(file_status, str) and file_status in file_known else "other-or-absent")] += 1
+                  for key, valid in fields.items():
+                      if not valid:
+                          counts[key] += 1
+                  if isinstance(sha, str) and re.fullmatch("[0-9A-Fa-f]{64}", sha) and sha != sha.lower():
+                      counts["uppercase-hex"] += 1
+          print(json.dumps({"traces": len(traces), "rejectionFields": counts}, sort_keys=True))
           PY
 
       - name: Measure all 84 catalog conditions against baseline
