@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
 use crate::renderer::backends::html_browser::HtmlBrowserSource;
 use crate::renderer::backends::html_debug_trace::HtmlDebugTrace;
@@ -6,7 +8,8 @@ use crate::renderer::backends::html_runtime::dom_state::HtmlDomBridgeState;
 use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 use crate::renderer::backends::html_subresources::{HtmlDocumentResources, HtmlSubresourceLoader};
 
-use super::{StaticHtmlRuntime, StaticHtmlRuntimeSession};
+use super::session_javascript_requirement::requires_javascript;
+use super::{ScriptlessDocument, StaticHtmlRuntime, StaticHtmlRuntimeSession};
 
 impl StaticHtmlRuntime {
     pub(in crate::renderer::backends) fn start_interactive_traced(
@@ -15,6 +18,37 @@ impl StaticHtmlRuntime {
         trace: &HtmlDebugTrace,
     ) -> Result<StaticHtmlRuntimeSession, HtmlRuntimeError> {
         let (document, resources, resource_loader) = load_document(source, trace);
+        if !requires_javascript(&document, &resources) {
+            return Ok(StaticHtmlRuntimeSession {
+                context: None,
+                isolate: None,
+                scriptless_document: Some(ScriptlessDocument::from(RefCell::new(document))),
+                #[cfg(test)]
+                scriptless_observer: Some(Box::new(
+                    super::session_scriptless_observer::ScriptlessObserver::new(
+                        source.origin.as_str(),
+                        resource_loader,
+                    ),
+                )),
+                external_stylesheets: resources.stylesheets,
+            });
+        }
+        Self::start_scripted(
+            document,
+            resources,
+            resource_loader,
+            source.origin.as_str(),
+            trace,
+        )
+    }
+
+    fn start_scripted(
+        document: HtmlDocument,
+        resources: HtmlDocumentResources,
+        resource_loader: HtmlSubresourceLoader,
+        document_url: &str,
+        trace: &HtmlDebugTrace,
+    ) -> Result<StaticHtmlRuntimeSession, HtmlRuntimeError> {
         let mut isolate = initialize_isolate(document, resource_loader, trace);
         let started = trace.start();
         let context = Self::execute_interactive_scripts(
@@ -22,7 +56,7 @@ impl StaticHtmlRuntime {
             &resources.scripts,
             resources.body_onload_script_index,
             resources.body_onload_source.as_deref(),
-            source.origin.as_str(),
+            document_url,
         )?;
         trace.finish(
             0,
@@ -30,11 +64,11 @@ impl StaticHtmlRuntime {
             started,
             &[("scripts", resources.scripts.len())],
         );
-        Ok(StaticHtmlRuntimeSession {
-            context: Some(context),
-            isolate: Some(isolate),
-            external_stylesheets: resources.stylesheets,
-        })
+        Ok(StaticHtmlRuntimeSession::scripted(
+            context,
+            isolate,
+            resources.stylesheets,
+        ))
     }
 }
 
@@ -75,3 +109,5 @@ fn initialize_isolate(
     trace.finish(0, "v8_setup", started, &[]);
     isolate
 }
+
+use crate::private_v8 as v8;

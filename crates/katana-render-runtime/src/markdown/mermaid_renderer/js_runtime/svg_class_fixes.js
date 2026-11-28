@@ -7,7 +7,7 @@ function katanaNormalizeClassSvg(svg) {
     /<g class="node default " id="[^"]*classId-[^"]*"/g,
     katanaNormalizeEmptyClassMethods,
   );
-  return katanaNormalizeClassFixtureLayout(normalized);
+  return normalized;
 }
 
 function katanaIsClassDiagramSvg(svg) {

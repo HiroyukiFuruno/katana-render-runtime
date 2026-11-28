@@ -1,6 +1,6 @@
 use crate::renderer::backends::html_interactive::style::CssStyle;
 use crate::renderer::backends::html_interactive::style::value::{
-    box_sides, css_resolved_px, split_top_level_whitespace,
+    box_sides, css_resolved_px, expand_box_values, split_top_level_whitespace,
 };
 
 #[derive(Clone, Copy)]
@@ -11,6 +11,7 @@ struct MarginValue {
 
 impl CssStyle {
     pub(crate) fn apply_padding_property(&mut self, name: &str, value: &str) {
+        self.explicit_padding = true;
         match name {
             "padding" => self.apply_padding(value),
             "padding-top" => {
@@ -124,19 +125,31 @@ impl CssStyle {
 const BOX_EDGE_COUNT: usize = 4;
 
 fn expand_margin_values(values: Vec<MarginValue>) -> Option<[MarginValue; BOX_EDGE_COUNT]> {
-    match values.as_slice() {
-        [all] => Some([*all; BOX_EDGE_COUNT]),
-        [vertical, horizontal] => Some([*vertical, *horizontal, *vertical, *horizontal]),
-        [top, horizontal, bottom] => Some([*top, *horizontal, *bottom, *horizontal]),
-        [top, right, bottom, left] => Some([*top, *right, *bottom, *left]),
-        _ => None,
-    }
+    expand_box_values(&values)
 }
 
 #[cfg(test)]
 mod tests {
     use super::MarginValue;
+    use super::expand_box_values;
     use super::expand_margin_values;
+
+    type BoxShorthandCase<'a> = (&'a [i32], Option<[i32; 4]>);
+
+    #[test]
+    fn box_shorthand_expands_zero_through_five_values() {
+        let cases: [BoxShorthandCase<'_>; 6] = [
+            (&[], None),
+            (&[1], Some([1, 1, 1, 1])),
+            (&[1, 2], Some([1, 2, 1, 2])),
+            (&[1, 2, 3], Some([1, 2, 3, 2])),
+            (&[1, 2, 3, 4], Some([1, 2, 3, 4])),
+            (&[1, 2, 3, 4, 5], None),
+        ];
+        for (values, expected) in cases {
+            assert_eq!(expand_box_values(values), expected);
+        }
+    }
 
     fn margin(length: f32) -> MarginValue {
         MarginValue {

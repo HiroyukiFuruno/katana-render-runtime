@@ -1,0 +1,69 @@
+{
+  "schema": "krr-svg-engine-usvg-writer-fixtures-v1",
+  "sourceRepository": "https://github.com/HiroyukiFuruno/katana-resvg",
+  "sourceCommit": "c01f0165059e472f45472cccddc573d32c13548a",
+  "licenseExpression": "Apache-2.0 OR MIT",
+  "licenseFiles": [
+    {
+      "path": "LICENSE-APACHE",
+      "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9"
+    },
+    {
+      "path": "LICENSE-MIT",
+      "sha256": "f5d934dc281b44e0003ee461ac740b18b6629a454decd872c774d34e4ee0b21d"
+    }
+  ],
+  "sourceFiles": {
+    "runner": "crates/usvg/tests/write.rs",
+    "writerFixtures": "crates/usvg/tests/files",
+    "fonts": "crates/resvg/tests/fonts",
+    "fontDocumentation": "crates/resvg/tests/fonts/README.md"
+  },
+  "inventoryDigestAlgorithm": "SHA-256 of sorted lines: relative-path, tab, byte-size, tab, file SHA-256, newline",
+  "writerFixtures": {
+    "relativePathRoot": "crates/usvg/tests/files",
+    "fileCount": 62,
+    "byteCount": 47956,
+    "inventorySha256": "0ce0fbc27fe89d39fa117ce82f3ea0d41bc16b0c474a9b8e1d687e00452792b4"
+  },
+  "fontFiles": {
+    "relativePathRoot": "crates/resvg/tests/fonts",
+    "fileCount": 34,
+    "byteCount": 7133220,
+    "inventorySha256": "415637e0d0a8d9800e78c4ff149eb27574218ce395ee7c0473523119e5a7c523"
+  },
+  "cases": [
+    { "name": "path-simple-case", "mode": "default" },
+    { "name": "ellipse-simple-case", "mode": "default" },
+    { "name": "text-simple-case", "mode": "default" },
+    { "name": "clip-path-with-transform", "mode": "default" },
+    { "name": "preserve-id-filter", "mode": "default" },
+    { "name": "preserve-id-fe-image", "mode": "default" },
+    { "name": "preserve-id-fe-image-with-opacity", "mode": "default" },
+    { "name": "generate-id-filter-function-v1", "mode": "default" },
+    { "name": "generate-id-filter-function-v2", "mode": "default" },
+    { "name": "filter-id-with-prefix", "mode": "id-prefix", "value": "prefix-" },
+    { "name": "filter-with-object-units-multi-use", "mode": "default" },
+    { "name": "preserve-id-clip-path-v1", "mode": "default" },
+    { "name": "preserve-id-clip-path-v2", "mode": "default" },
+    { "name": "preserve-id-for-clip-path-in-pattern", "mode": "default" },
+    { "name": "generate-id-clip-path-for-symbol", "mode": "default" },
+    { "name": "clip-path-with-text", "mode": "default" },
+    { "name": "clip-path-with-complex-text", "mode": "default" },
+    { "name": "clip-path-with-object-units-multi-use", "mode": "default" },
+    { "name": "mask-with-object-units-multi-use", "mode": "default" },
+    { "name": "text-with-generated-gradients", "mode": "default" },
+    { "name": "preserve-text-multiple-font-families", "mode": "preserve-text" },
+    { "name": "preserve-text-on-path", "mode": "preserve-text" },
+    { "name": "preserve-text-in-clip-path", "mode": "preserve-text" },
+    { "name": "preserve-text-in-mask", "mode": "preserve-text" },
+    { "name": "preserve-text-in-pattern", "mode": "preserve-text" },
+    { "name": "preserve-text-simple-case", "mode": "default" },
+    { "name": "preserve-text-with-dx-and-dy", "mode": "preserve-text" },
+    { "name": "preserve-text-with-rotate", "mode": "preserve-text" },
+    { "name": "preserve-text-with-complex-text-decoration", "mode": "preserve-text" },
+    { "name": "preserve-text-with-nested-baseline-shift", "mode": "preserve-text" },
+    { "name": "optimize-paths-without-markers", "mode": "default" }
+  ],
+  "expectedSvgPolicy": "Read-only regression references; never regenerate or edit during tests"
+}

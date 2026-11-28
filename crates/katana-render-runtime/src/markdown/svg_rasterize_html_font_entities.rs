@@ -66,4 +66,16 @@ mod tests {
     fn leaves_malformed_or_unknown_xml_entities_unchanged() {
         assert_eq!(decode_xml_entities("&unknown; &amp"), "&unknown; &amp");
     }
+
+    #[test]
+    fn decodes_uppercase_hex_and_non_ascii_numeric_entities() {
+        assert_eq!(decode_xml_entities("&#X6F22;&#233;"), "漢é");
+    }
+
+    #[test]
+    fn preserves_invalid_numeric_entities_between_valid_family_text() {
+        let input = "Font &#x110000; &#55296; &#xZZ; &#no; &lt;Fallback&gt;";
+        let expected = "Font &#x110000; &#55296; &#xZZ; &#no; <Fallback>";
+        assert_eq!(decode_xml_entities(input), expected);
+    }
 }

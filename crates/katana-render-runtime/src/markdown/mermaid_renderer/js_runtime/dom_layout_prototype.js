@@ -82,6 +82,15 @@ KatanaNode.prototype.getBBox = function getBBox() {
   return katanaMeasuredBox(this);
 };
 
+KatanaNode.prototype.getTotalLength = function getTotalLength() {
+  if (this.localName !== "path") return 0;
+  /** @type {typeof globalThis & { __katanaSvgPathLength?: (pathData: string) => number }} */
+  const host = globalThis;
+  const bridge = host.__katanaSvgPathLength;
+  if (typeof bridge !== "function") throw new Error("SVG path length bridge is unavailable");
+  return bridge(this.getAttribute("d") ?? "");
+};
+
 KatanaNode.prototype.getBoundingClientRect = function getBoundingClientRect() {
   const box = katanaElementClientBox(this);
   return { ...box, top: box.y, left: box.x, right: box.x + box.width, bottom: box.y + box.height };

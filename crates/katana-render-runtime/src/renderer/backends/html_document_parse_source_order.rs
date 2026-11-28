@@ -86,7 +86,9 @@ impl SourceOrderSink {
 
     fn observe_script(&self, node: &Handle) {
         if self.node_is_visible(node) {
-            self.scripts.set(self.scripts.get() + 1);
+            if crate::renderer::backends::html_dom_helpers::script_is_executable(node) {
+                self.scripts.set(self.scripts.get() + 1);
+            }
             self.source_order
                 .borrow_mut()
                 .push(SourceOrderEntry::Script(node.clone()));

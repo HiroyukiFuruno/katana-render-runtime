@@ -11,7 +11,8 @@ pub(super) fn grid_track_widths(
 ) -> Vec<f32> {
     let tracks = &parent.grid_template_columns;
     let count = tracks.len().max(1);
-    let available = (width - parent.gap * count.saturating_sub(1) as f32).max(MIN_LAYOUT_WIDTH);
+    let column_gap = parent.flow_column_gap.unwrap_or(parent.gap);
+    let available = (width - column_gap * count.saturating_sub(1) as f32).max(MIN_LAYOUT_WIDTH);
     let intrinsic = intrinsic_track_widths(nodes, styles, tracks, count);
     let mut widths = initial_grid_widths(tracks, &intrinsic, available);
     if widths.is_empty() {

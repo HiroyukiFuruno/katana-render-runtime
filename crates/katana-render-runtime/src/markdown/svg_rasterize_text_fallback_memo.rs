@@ -7,6 +7,8 @@ mod cache;
 mod entries;
 #[path = "svg_rasterize_text_fallback_memo_scope.rs"]
 mod scope;
+#[cfg(target_os = "macos")]
+pub(super) use entries::{physical_face_lookup, physical_face_store};
 
 #[cfg(test)]
 const MAX_SELECTOR_ENTRIES: usize = entries::MAX_ENTRIES;
@@ -25,6 +27,21 @@ pub(in super::super) fn install(options: &mut usvg::Options<'_>) {
             cache::Lookup::Bypass => selector(character, excluded_ids, database),
         }
     });
+    if let Some(selector) = options.font_resolver.select_styled_fallback.take() {
+        options.font_resolver.select_styled_fallback = Some(Box::new(
+            move |font, character, excluded, database| match cache::lookup_styled(
+                database, font, character, excluded,
+            ) {
+                cache::Lookup::Hit(selection) => selection,
+                cache::Lookup::Miss(key) => {
+                    let selection = selector(font, character, excluded, database);
+                    entries::store(database, key, selection);
+                    selection
+                }
+                cache::Lookup::Bypass => selector(font, character, excluded, database),
+            },
+        ));
+    }
 }
 
 fn select_and_store(

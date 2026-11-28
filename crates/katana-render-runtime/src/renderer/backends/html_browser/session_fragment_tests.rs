@@ -1,5 +1,6 @@
 use super::{
-    HtmlBrowserError, HtmlBrowserInput, HtmlBrowserSession, HtmlBrowserSource, HtmlBrowserViewport,
+    HtmlBrowserError, HtmlBrowserSession, HtmlBrowserSource, HtmlBrowserViewport,
+    shared_input_test_support::dispatch_primary_click,
 };
 use crate::HtmlBrowserOrigin;
 
@@ -17,7 +18,7 @@ fn session_accepts_same_document_fragment_frames_without_host_navigation() -> Te
         .map(|frame| frame.generation)
         .ok_or_else(|| "initial frame update must exist".to_string())?;
 
-    dispatch_primary_click(&mut session)?;
+    dispatch_primary_click(&mut session, TEST_POINTER_COORDINATE)?;
 
     assert_fragment_frame(&mut session, initial_generation)
 }
@@ -26,7 +27,7 @@ fn session_accepts_same_document_fragment_frames_without_host_navigation() -> Te
 fn rejected_stale_fragment_frame_preserves_the_accepted_origin() -> TestResult {
     let mut session = HtmlBrowserSession::new(fragment_source()?, viewport()?)
         .map_err(|error| error.to_string())?;
-    dispatch_primary_click(&mut session)?;
+    dispatch_primary_click(&mut session, TEST_POINTER_COORDINATE)?;
     let mut stale = session
         .latest_frame()
         .cloned()
@@ -62,26 +63,6 @@ fn fragment_source() -> TestResult<HtmlBrowserSource> {
 fn viewport() -> TestResult<HtmlBrowserViewport> {
     HtmlBrowserViewport::new(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT, 1.0)
         .map_err(|error| error.to_string())
-}
-
-fn dispatch_primary_click(session: &mut HtmlBrowserSession) -> TestResult {
-    for input in [
-        HtmlBrowserInput::PointerDown {
-            x: TEST_POINTER_COORDINATE,
-            y: TEST_POINTER_COORDINATE,
-            button: 0,
-        },
-        HtmlBrowserInput::PointerUp {
-            x: TEST_POINTER_COORDINATE,
-            y: TEST_POINTER_COORDINATE,
-            button: 0,
-        },
-    ] {
-        session
-            .dispatch_input(input)
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
 }
 
 fn assert_fragment_frame(session: &mut HtmlBrowserSession, initial_generation: u64) -> TestResult {

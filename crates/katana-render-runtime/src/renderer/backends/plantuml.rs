@@ -90,6 +90,7 @@ mod tests {
     use crate::renderer::api::{
         DiagramKind, RenderConfig, RenderContext, RenderError, RenderInput, RenderPolicy, Renderer,
     };
+    use crate::system::ProcessService;
 
     #[test]
     fn cache_constructor_and_theme_catalog_are_available() {
@@ -99,17 +100,49 @@ mod tests {
         assert!(PlantUmlRenderer::available_themes().contains(&"cyborg"));
     }
 
-    #[test]
-    fn invalid_plantuml_config_returns_runtime_error() {
+    #[rstest::rstest]
+    #[case::theme("plantuml_theme", "bad theme")]
+    #[case::cache_path("plantuml_cache_dir", "/tmp/krr\ncache")]
+    fn invalid_config_is_rejected_before_runtime_access(#[case] field: &str, #[case] value: &str) {
         let renderer = PlantUmlRenderer::with_runtime_path("missing-plantuml.jar".into());
-        let result = renderer.render(&input(serde_json::json!({
-            "plantuml_theme": "bad theme",
-        })));
+        let result = renderer.render(&input(serde_json::json!({ (field): value })));
 
         assert!(matches!(
             result,
-            Err(RenderError::Runtime(error)) if error.contains("invalid PlantUML config")
+            Err(RenderError::Runtime(error))
+                if error.contains("invalid PlantUML config")
+                    && error.contains(field)
         ));
+    }
+
+    #[test]
+    fn same_renderer_recovers_from_missing_jar_in_real_jvm()
+    -> Result<(), Box<dyn std::error::Error>> {
+        const CHILD: &str = "KRR_PLANTUML_RECOVERY_CHILD";
+        const CASE_NAME: &str = "renderer::backends::plantuml::tests::same_renderer_recovers_from_missing_jar_in_real_jvm";
+        let in_child = ProcessService::enter_isolated_test_child(CHILD, CASE_NAME)?;
+        if !in_child {
+            return Ok(());
+        }
+        let fixture = tempfile::tempdir()?;
+        let jar_path = fixture.path().join("plantuml.jar");
+        let renderer = PlantUmlRenderer::with_runtime_path(jar_path.clone());
+        let input = input(serde_json::Value::Null);
+        let warning = renderer.render(&input)?;
+        assert_eq!(warning.diagnostics.warnings.len(), 1);
+        assert!(warning.diagnostics.warnings[0].contains("plantuml.jar was not found"));
+        assert!(warning.svg.starts_with("```plantuml"));
+        std::fs::copy(super::PlantUmlRendererOps::default_jar_path(), &jar_path)?;
+        let recovered = renderer.render(&input)?;
+        assert!(recovered.svg.contains("<svg") && recovered.svg.contains("Alice"));
+        assert!(recovered.width > 0.0 && recovered.height > 0.0);
+        assert!(recovered.diagnostics.warnings.is_empty());
+        assert_ne!(warning.cache_fingerprint, recovered.cache_fingerprint);
+        assert_eq!(
+            recovered.cache_fingerprint,
+            renderer.render(&input)?.cache_fingerprint
+        );
+        Ok(())
     }
 
     fn input(vendor_config: serde_json::Value) -> RenderInput {

@@ -1,9 +1,14 @@
-use resvg::usvg::fontdb;
+use resvg::usvg::{self, fontdb};
 use std::{
     collections::HashMap,
     mem,
     sync::{Arc, Weak},
 };
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_text_fallback_memo_physical_faces.rs"]
+mod physical_faces;
+#[cfg(target_os = "macos")]
+pub(in super::super) use physical_faces::{physical_face_lookup, physical_face_store};
 
 pub(super) const MAX_DATABASES: usize = 8;
 pub(super) const MAX_ENTRIES: usize = 4096;
@@ -13,11 +18,14 @@ pub(super) const MAX_KEY_BYTES: usize = 1024 * 1024;
 pub(super) struct SelectorKey {
     character: char,
     excluded_ids: Box<[fontdb::ID]>,
+    requested: Option<(u16, usvg::FontStyle, usvg::FontStretch)>,
 }
 
 struct DatabaseMemo {
     database: Weak<fontdb::Database>,
     selections: HashMap<SelectorKey, Option<fontdb::ID>>,
+    #[cfg(target_os = "macos")]
+    physical_faces: HashMap<fontdb::ID, (super::super::font::FontSourceGeneration, bool)>,
 }
 
 #[derive(Default)]
@@ -90,6 +98,8 @@ pub(super) fn add_database(database: &Arc<fontdb::Database>) {
             memo.databases.push(DatabaseMemo {
                 database: Arc::downgrade(database),
                 selections: HashMap::new(),
+                #[cfg(target_os = "macos")]
+                physical_faces: HashMap::new(),
             });
         }
     });
@@ -141,6 +151,7 @@ fn can_store(memo: &SelectorMemo, bytes: usize) -> bool {
 
 pub(super) fn key_bytes(key: &SelectorKey) -> usize {
     mem::size_of::<char>()
+        + mem::size_of::<Option<(u16, usvg::FontStyle, usvg::FontStretch)>>()
         + key
             .excluded_ids
             .len()
@@ -148,12 +159,27 @@ pub(super) fn key_bytes(key: &SelectorKey) -> usize {
 }
 
 pub(super) fn selector_key_size(excluded_count: usize) -> usize {
-    mem::size_of::<char>() + excluded_count.saturating_mul(mem::size_of::<fontdb::ID>())
+    mem::size_of::<char>()
+        + mem::size_of::<Option<(u16, usvg::FontStyle, usvg::FontStretch)>>()
+        + excluded_count.saturating_mul(mem::size_of::<fontdb::ID>())
 }
 
 pub(super) fn selector_key(character: char, excluded_ids: &[fontdb::ID]) -> SelectorKey {
     SelectorKey {
         character,
         excluded_ids: excluded_ids.into(),
+        requested: None,
+    }
+}
+
+pub(super) fn styled_selector_key(
+    font: &usvg::Font,
+    character: char,
+    excluded_ids: &[fontdb::ID],
+) -> SelectorKey {
+    SelectorKey {
+        character,
+        excluded_ids: excluded_ids.into(),
+        requested: Some((font.weight(), font.style(), font.stretch())),
     }
 }

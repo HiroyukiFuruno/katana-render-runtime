@@ -4,14 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import type { Fixture } from "./diagram_update_fixtures";
 import { MarkdownReferenceAssets } from "./diagram_update_markdown_assets";
+import { makeOnePixelPng } from "./mermaid_pair_test_support";
+import { publishMermaidPair, sha256 } from "./mermaid-pair-manifest";
 
 test("skip-errors preserves references captured before an invalid fixture render", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "katana-mermaid-assets-"));
   try {
-    const source = path.join(root, "official");
-    const target = path.join(root, "markdown");
-    fs.mkdirSync(source);
-    fs.mkdirSync(target);
+    const { source, target } = assetTestDirectories(root);
     const fixture = fixtureFor(root);
     const svg = path.join(target, `${fixture.slug}.svg`);
     const png = path.join(source, `${fixture.slug}.png`);
@@ -32,10 +31,7 @@ test("skip-errors preserves references captured before an invalid fixture render
 test("skip-errors removes partial assets only when no reference existed before render", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "katana-mermaid-assets-"));
   try {
-    const source = path.join(root, "official");
-    const target = path.join(root, "markdown");
-    fs.mkdirSync(source);
-    fs.mkdirSync(target);
+    const { source, target } = assetTestDirectories(root);
     const fixture = fixtureFor(root);
     const assets = new MarkdownReferenceAssets(source, target);
     const referencesBeforeRender = assets.capture(fixture);
@@ -91,19 +87,18 @@ test("skip-errors restores both directories after markdown sync and successful s
     const targetSvg = path.join(target, `${fixture.slug}.svg`);
     const targetPng = path.join(target, `${fixture.slug}.png`);
     const previousAssets: Array<[string, string]> = [
-      [sourceSvg, "old-source-svg"],
-      [sourcePng, "old-source-png"],
       [targetSvg, "old-target-svg"],
       [targetPng, "old-target-png"],
+      [path.join(target, `${fixture.slug}.pair.json`), "old-target-manifest"],
     ];
     for (const [file, content] of previousAssets) {
       fs.writeFileSync(file, content, "utf8");
     }
 
     const assets = new MarkdownReferenceAssets(source, target);
+    publishPair(source, "old-source-svg");
     const referencesBeforeRender = assets.capture(fixture);
-    fs.writeFileSync(sourceSvg, "new-svg", "utf8");
-    fs.writeFileSync(sourcePng, "new-png", "utf8");
+    publishPair(source, "new-source-svg");
     assets.sync(fixture);
     try {
       throw new Error("injected writer failure after markdown asset sync");
@@ -111,15 +106,44 @@ test("skip-errors restores both directories after markdown sync and successful s
       expect(assets.skipFailedFixture(fixture, referencesBeforeRender)).toBe(false);
     }
     expect(fs.readFileSync(sourceSvg, "utf8")).toBe("old-source-svg");
-    expect(fs.readFileSync(sourcePng, "utf8")).toBe("old-source-png");
+    expect(fs.existsSync(sourcePng)).toBe(true);
     expect(fs.readFileSync(targetSvg, "utf8")).toBe("old-target-svg");
     expect(fs.readFileSync(targetPng, "utf8")).toBe("old-target-png");
 
-    fs.writeFileSync(sourceSvg, "successful-svg", "utf8");
-    fs.writeFileSync(sourcePng, "successful-png", "utf8");
+    publishPair(source, "successful-svg");
     assets.sync(fixture);
     expect(fs.readFileSync(targetSvg, "utf8")).toBe("successful-svg");
-    expect(fs.readFileSync(targetPng, "utf8")).toBe("successful-png");
+    expect(fs.existsSync(targetPng)).toBe(true);
+    expect(fs.existsSync(path.join(target, `${fixture.slug}.pair.json`))).toBe(true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("manifest-target failure restores the previous SVG and PNG before aborting sync", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "katana-mermaid-assets-"));
+  try {
+    const source = path.join(root, "official");
+    const target = path.join(root, "markdown-assets");
+    fs.mkdirSync(source);
+    fs.mkdirSync(target);
+    const fixture = fixtureFor(root);
+    publishPair(source, "new-official-svg");
+    publishPair(target, "previous-target-svg");
+    const previousSvg = fs.readFileSync(path.join(target, `${fixture.slug}.svg`));
+    const previousPng = fs.readFileSync(path.join(target, `${fixture.slug}.png`));
+    const marker = path.join(target, `${fixture.slug}.pair.json`);
+    fs.unlinkSync(marker);
+    const blocked = path.join(root, "blocked-marker.json");
+    fs.writeFileSync(blocked, "blocked");
+    fs.symlinkSync(blocked, marker);
+
+    const assets = new MarkdownReferenceAssets(source, target);
+    expect(() => assets.sync(fixture)).toThrow("must not be a symlink");
+    expect(fs.readFileSync(path.join(target, `${fixture.slug}.svg`))).toEqual(previousSvg);
+    expect(fs.readFileSync(path.join(target, `${fixture.slug}.png`))).toEqual(previousPng);
+    expect(fs.lstatSync(marker).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(blocked, "utf8")).toBe("blocked");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -137,4 +161,33 @@ function fixtureFor(root: string): Fixture {
     source: "",
     fenceEnd: markdown.length,
   };
+}
+
+function assetTestDirectories(root: string): { source: string; target: string } {
+  const source = path.join(root, "official");
+  const target = path.join(root, "markdown");
+  fs.mkdirSync(source);
+  fs.mkdirSync(target);
+  return { source, target };
+}
+
+function publishPair(directory: string, svgText: string) {
+  const svg = Buffer.from(svgText);
+  const png = makeOnePixelPng();
+  const document = { source: svgText };
+  publishMermaidPair({
+    directory,
+    slug: "29-empty",
+    role: "official",
+    sourceSvg: svg,
+    renderedSvg: svg,
+    png,
+    provenance: {
+      path: "embedded:test",
+      sha256: sha256(Buffer.from(JSON.stringify(document))),
+      document,
+    },
+    config: { test: true },
+    runtimeAssets: [],
+  });
 }

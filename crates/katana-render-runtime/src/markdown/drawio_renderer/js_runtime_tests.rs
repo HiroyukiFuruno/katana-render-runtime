@@ -5,13 +5,10 @@ use super::test_support::{
     OFFICIAL_REFERENCE_VIEWPORT_BUNDLE_HOOK, fake_bundle, temp_runtime_path,
 };
 use super::{
-    DrawioJsRuntimeOps, DrawioRenderRequest, RuntimeBundleCache, ensure_svg, lock_cache,
-    read_drawio_bundle, read_drawio_bundle_with_cache, rendered_svg,
+    DrawioJsRuntimeOps, DrawioRenderRequest, ensure_svg, read_drawio_bundle, rendered_svg,
 };
 use crate::markdown::color_preset::DiagramColorPreset;
 use crate::markdown::runtime_assets::RuntimeAsset;
-use std::collections::HashMap;
-use std::sync::Mutex;
 
 const NAMESPACED_DESCENDANTS_BUNDLE: &str = r#"
 function Graph() {}
@@ -72,16 +69,15 @@ GraphViewer.createViewerForElement = function createViewerForElement(_container,
 "#;
 
 #[test]
-fn bundle_cache_reads_once() {
+fn bundle_read_reflects_same_path_updates() {
     let path = temp_runtime_path("kdr-drawio-runtime-unit");
     assert!(std::fs::write(&path, "function GraphViewer() {}").is_ok());
 
-    let cache: RuntimeBundleCache = Mutex::new(HashMap::new());
-    let first = read_drawio_bundle_with_cache(&path, &cache);
+    let first = read_drawio_bundle(&path);
     assert!(matches!(first.as_deref(), Ok("function GraphViewer() {}")));
     assert!(std::fs::write(&path, "changed").is_ok());
-    let second = read_drawio_bundle_with_cache(&path, &cache);
-    assert!(matches!(second.as_deref(), Ok("function GraphViewer() {}")));
+    let second = read_drawio_bundle(&path);
+    assert!(matches!(second.as_deref(), Ok("changed")));
 }
 
 #[test]
@@ -277,23 +273,4 @@ fn cached_remote_image_is_embedded_from_packaged_resources() -> Result<(), Strin
 #[test]
 fn rendered_svg_rejects_plain_text_from_runtime() {
     assert!(rendered_svg("plain text".to_string()).is_err());
-}
-
-#[test]
-fn poisoned_cache_reports_lock_error() {
-    let cache: RuntimeBundleCache = Mutex::new(HashMap::new());
-    let poison = std::panic::catch_unwind(|| poison_cache(&cache));
-
-    assert!(poison.is_err());
-    assert!(lock_cache(&cache).is_err());
-    assert!(read_drawio_bundle_with_cache(std::path::Path::new("drawio.js"), &cache).is_err());
-    poison_cache(&cache);
-}
-
-fn poison_cache(cache: &RuntimeBundleCache) {
-    let _guard = match cache.lock() {
-        Ok(guard) => guard,
-        Err(_) => return,
-    };
-    std::panic::resume_unwind(Box::new("poison drawio cache"));
 }

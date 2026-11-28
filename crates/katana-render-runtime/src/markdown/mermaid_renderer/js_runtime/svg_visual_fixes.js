@@ -13,14 +13,8 @@ function katanaNormalizeFlowchartEdgeLabelSvg(svg, request) {
 
 function katanaNormalizeStateEdgeLabelSvg(svg, request) {
   return katanaApplySvgWhen(svg, katanaHasStateDiagramRole, (current) =>
-    katanaNormalizeStateViewBox(
-      katanaNormalizeStateNodeLabels(katanaEdgeLabelSvgForRequest(current, request)),
-    ),
+    katanaEdgeLabelSvgForRequest(current, request),
   );
-}
-
-function katanaNormalizeStateViewBox(svg) {
-  return katanaStateViewBoxContext(svg).map(katanaApplyStateViewBox).concat([svg])[0];
 }
 
 function katanaHasFlowchartRole(svg) {
@@ -41,40 +35,6 @@ function katanaEdgeLabelSvgForRequest(svg, request) {
   );
 }
 
-function katanaStateViewBoxContext(svg) {
-  return [{ svg, viewBox: katanaReadViewBox(svg) }].filter(katanaHasStateViewBoxContext);
-}
-
-function katanaHasStateViewBoxContext(context) {
-  return [
-    context.viewBox,
-    context.viewBox?.[1] !== 0,
-    Math.abs(context.viewBox?.[1] ?? 0) <= 12,
-  ].every(Boolean);
-}
-
-function katanaApplyStateViewBox(context) {
-  const viewBox = context.viewBox;
-  const x = katanaNormalizedStateViewBoxX(viewBox);
-  const width = katanaNormalizedStateViewBoxWidth(viewBox);
-  return katanaSetSvgViewBox(
-    katanaSetSvgMaxWidth(context.svg, width),
-    `${katanaFormatVisualNumber(x)} 0 ${katanaFormatVisualNumber(width)} ${katanaFormatVisualNumber(viewBox[3] + viewBox[1])}`,
-  );
-}
-
-function katanaNormalizedStateViewBoxX(viewBox) {
-  return katanaShouldTrimStateViewBoxLeft(viewBox) ? 0 : viewBox[0];
-}
-
-function katanaNormalizedStateViewBoxWidth(viewBox) {
-  return katanaShouldTrimStateViewBoxLeft(viewBox) ? viewBox[2] + viewBox[0] : viewBox[2];
-}
-
-function katanaShouldTrimStateViewBoxLeft(viewBox) {
-  return Math.abs(viewBox[0] + 8) < 0.01;
-}
-
 function katanaFormatVisualNumber(value) {
   return Number(value.toFixed(6)).toString();
 }
@@ -83,39 +43,11 @@ function katanaShouldHideEdgeLabelBackground(request) {
   return request.theme !== "dark";
 }
 
-function katanaNormalizeStateNodeLabels(svg) {
-  return katanaRewriteBalancedGroups(
-    svg,
-    /<g class="node\s+statediagram-state\s+"/g,
-    katanaNormalizeStateNodeLabel,
-  );
-}
-
-function katanaNormalizeStateNodeLabel(node) {
-  return node
-    .replace(
-      /(<g class="label" style="" transform="translate\()[-\d.]+,\s*([-\d.]+)(\)">)/g,
-      "$10, $2$3",
-    )
-    .replace(/<text y="-10\.1" style="">/g, '<text y="-10.1" style="" text-anchor="middle">');
-}
-
 function katanaNormalizeRequirementEdgeLabelSvg(svg) {
   if (!svg.includes('aria-roledescription="requirement"')) {
     return svg;
   }
-  const normalized = katanaNormalizeRequirementViewBox(svg)
-    .replace(/(<g class="label" data-id="[^"]+" transform="translate\(0, )5\.76(\)")/g, "$1-10.5$2")
-    .replace(/(<g class="label" data-id="[^"]+" transform="translate\(0, )-9\.5(\)")/g, "$1-10.5$2")
-    .replace(
-      /<rect class="background" style="" x="-54" y="-17\.36" width="108" height="23\.2"><\/rect>/g,
-      '<rect class="background" style="" x="-48" y="-1" width="96" height="23"></rect>',
-    )
-    .replace(
-      /<rect class="background" style="" x="-47\.75500000000001" y="-2" width="95\.51000000000002" height="23"><\/rect>/g,
-      '<rect class="background" style="" x="-47.7578125" y="-1" width="95.515625" height="23"></rect>',
-    );
-  return katanaNormalizeRequirementLocalizedSvg(normalized);
+  return katanaNormalizeRequirementViewBox(svg);
 }
 
 function katanaNormalizeRequirementViewBox(svg) {
@@ -153,9 +85,23 @@ function katanaNormalizeJourneySvg(svg, request) {
   if (!svg.includes('aria-roledescription="journey"')) {
     return svg;
   }
-  return svg
+  return katanaJourneySvgFallbackUsesInheritedTypography(svg)
     .replace(/<text\b([^>]*?)\sfill=""([^>]*)>/g, `<text$1 fill="${request.text}"$2>`)
     .replace(/(<line\b[^>]*\bstroke=")black(")/g, `$1${request.text}$2`);
+}
+
+function katanaJourneySvgFallbackUsesInheritedTypography(svg) {
+  return svg.replace(
+    /(<text\b(?=[^>]*\bclass="[^"]*\b(?:task|journey-section)\b[^"]*")[^>]*\bstyle=")([^"]*)(")/g,
+    (_match, start, style, end) => `${start}${katanaJourneyTextStyleWithoutDomFont(style)}${end}`,
+  );
+}
+
+function katanaJourneyTextStyleWithoutDomFont(style) {
+  return style.replace(
+    /(?:^|;)\s*font-(?:family|size)\s*:(?:(?:&(?:#[0-9]+|#x[\da-f]+|[a-z][\da-z.-]*);)|[^;])*/gi,
+    "",
+  );
 }
 
 function katanaNormalizePieSvg(svg) {
@@ -174,70 +120,13 @@ function katanaNormalizePieSvg(svg) {
       return `${start}${katanaRemoveSvgAttr(attributes, "style")} style="fill: ${fill}; stroke: ${fill};"${end}`;
     },
   );
-  return katanaNormalizePieViewBox(withLegend);
-}
-
-function katanaNormalizePieViewBox(svg) {
-  return katanaPieViewBoxContext(svg).map(katanaApplyPieViewBox).concat([svg])[0];
-}
-
-function katanaPieViewBoxContext(svg) {
-  return [{ svg, viewBox: katanaReadViewBox(svg), contentBox: katanaContentBox(svg) }].filter(
-    katanaHasPieViewBoxContext,
-  );
-}
-
-function katanaHasPieViewBoxContext(context) {
-  return [context.viewBox, context.contentBox].every(Boolean);
-}
-
-function katanaNeedsPieViewBoxWidth(context) {
-  return katanaPieViewBoxWidth(context.viewBox, context.contentBox) > context.viewBox[2];
-}
-
-function katanaApplyPieViewBox(context) {
-  const width = katanaNormalizedPieViewBoxWidth(context.svg, context.viewBox, context.contentBox);
-  return katanaSetNormalizedSvgSize(context.svg, [
-    context.viewBox[0],
-    context.viewBox[1],
-    width,
-    context.viewBox[3],
-  ]);
+  return withLegend;
 }
 
 const KATANA_EDGE_LABEL_BACKGROUND_READERS = [
   (svg) => svg,
   (svg) => katanaHideBackgroundRects(svg),
 ];
-
-function katanaPieViewBoxWidth(viewBox, contentBox) {
-  const right = contentBox[0] + contentBox[2];
-  return Math.max(viewBox[2], right + 40);
-}
-
-function katanaNormalizedPieViewBoxWidth(svg, viewBox, contentBox) {
-  const widened = katanaPieViewBoxWidth(viewBox, contentBox);
-  const maxLegendTextLength = katanaPieMaxLegendTextLength(svg);
-  if (maxLegendTextLength <= 4) {
-    return Math.ceil(widened);
-  }
-  if (katanaPieHasNonAsciiLegend(svg) && maxLegendTextLength >= 8) {
-    return katanaFormatVisualNumber(viewBox[2] - 0.38125);
-  }
-  return Math.floor(viewBox[2] * 2) / 2;
-}
-
-function katanaPieMaxLegendTextLength(svg) {
-  return Array.from(svg.matchAll(/<g class="legend"[\s\S]*?<text\b[^>]*>([^<]*)<\/text>/g))
-    .map((match) => match[1]?.trim()?.length ?? 0)
-    .reduce((maxLength, length) => Math.max(maxLength, length), 0);
-}
-
-function katanaPieHasNonAsciiLegend(svg) {
-  return Array.from(svg.matchAll(/<g class="legend"[\s\S]*?<text\b[^>]*>([^<]*)<\/text>/g)).some((match) =>
-    /[^\x00-\x7F]/.test(match[1] ?? ""),
-  );
-}
 
 function katanaNormalizeVennSvg(svg) {
   if (!svg.includes('aria-roledescription="venn"')) {

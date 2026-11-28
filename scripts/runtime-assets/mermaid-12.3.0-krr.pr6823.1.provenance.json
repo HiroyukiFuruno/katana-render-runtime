@@ -1,0 +1,40 @@
+{
+  "schema": "krr-mermaid-patched-runtime-provenance-v1",
+  "artifact_version": "12.3.0-krr.pr6823.1",
+  "upstream_version": "12.3.0",
+  "upstream_repository": "https://github.com/mermaid-js/mermaid",
+  "upstream_tag": "mermaid@12.3.0",
+  "upstream_commit": "2086904e76c692331e34a45d7cc3bc30860d040e",
+  "upstream_archive_url": "https://codeload.github.com/mermaid-js/mermaid/tar.gz/2086904e76c692331e34a45d7cc3bc30860d040e",
+  "upstream_archive_sha256": "04077bb929196318ead77bb37db35455044705f426d6ca9d527b611000cbf914",
+  "license": "MIT",
+  "license_sha256": "ec9fb67dcb25eccc416ed56e1aab819222c805a2a4bfe4cb19e7556bf2ffde80",
+  "patch": {
+    "source": "https://github.com/mermaid-js/mermaid/pull/6823",
+    "path": "scripts/runtime-assets/mermaid-12.2.0-krr.pr6823.1.patch",
+    "sha256": "83b12555170e0bef0303a0995d19f8524daf909d90862f052fec863ad9f5dddf",
+    "scope": "sankey.jison Unicode macros and two lexer substitutions only"
+  },
+  "lock": {
+    "path": "pnpm-lock.yaml",
+    "sha256": "491bd71f2f09902927380c6c51b1ef0dcf31b4751a96129b039f7612c424c599",
+    "package_manager": "pnpm 10.30.3",
+    "pnpm_cjs_sha256": "b276da51dc8ca5b0d3ee3371695b50fc8b3244b281b091c63a3f082a88dadeb9",
+    "node": "v26.10.0"
+  },
+  "build": {
+    "recipe": "scripts/runtime-assets/mermaid-12.2.0-krr.pr6823.1.build.sh",
+    "inputs": "scripts/runtime-assets/mermaid-12.3.0-krr.pr6823.1.inputs.sh",
+    "command": "pnpm install --frozen-lockfile && pnpm build:mermaid",
+    "output": "mermaid.min.js",
+    "output_sha256": "2c1ab92dfbd9149c5eec9c1f9c18999063b1721ad7868163ea3f4fe4e9231eaf",
+    "output_bytes": 5537894
+  },
+  "unpatched_grammar_fixture": {
+    "path": "tests/fixtures/runtime-assets/mermaid-12.2.0-sankey.jison",
+    "sha256": "1f5b7bf55f5cf1c9149543678aa827f5ab5340998dd33fbdeaaf73921b49cff0",
+    "upstream_path": "packages/mermaid/src/diagrams/sankey/parser/sankey.jison",
+    "license": "MIT"
+  },
+  "license_file": "crates/katana-render-runtime/vendor/mermaid/12.3.0-krr.pr6823.1/LICENSE"
+}

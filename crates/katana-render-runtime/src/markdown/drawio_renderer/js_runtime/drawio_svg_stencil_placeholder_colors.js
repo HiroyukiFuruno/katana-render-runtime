@@ -87,11 +87,13 @@ function katanaDrawioStencilDefaultColorFromContent(content, shape, token) {
   const stencilName = katanaDrawioStencilName(content, shape);
   const stencil = content.match(katanaDrawioStencilPattern(stencilName))?.[0] ?? "";
   const styleName = katanaDrawioPlaceholderStyleName(token);
-  return Array.from(stencil.matchAll(/<(?:fillcolor|strokecolor)\b[^>]*>/gi))
-    .map((match) => match[0])
-    .filter((tag) => katanaDrawioStencilColorTagUsesStyle(tag, styleName))
-    .map(katanaDrawioStencilColorTagDefault)
-    .find(Boolean) ?? "";
+  return (
+    Array.from(stencil.matchAll(/<(?:fillcolor|strokecolor)\b[^>]*>/gi))
+      .map((match) => match[0])
+      .filter((tag) => katanaDrawioStencilColorTagUsesStyle(tag, styleName))
+      .map(katanaDrawioStencilColorTagDefault)
+      .find(Boolean) ?? ""
+  );
 }
 
 function katanaDrawioStencilColorTagUsesStyle(tag, styleName) {
@@ -121,8 +123,9 @@ function katanaDrawioCiscoSourceSecondaryPlaceholderColor(element, token, color)
 function katanaDrawioFallbackStencilPlaceholderColor(element, token) {
   if (katanaDrawioIsCiscoShapeElement(element)) {
     return (
-      KATANA_DRAWIO_CISCO_PLACEHOLDER_COLORS_BY_THEME[Number(katanaDrawioIsDarkMode())].get(token) ??
-      ""
+      KATANA_DRAWIO_CISCO_PLACEHOLDER_COLORS_BY_THEME[Number(katanaDrawioIsDarkMode())].get(
+        token,
+      ) ?? ""
     );
   }
   return katanaDrawioIsAndroidDeviceShapeElement(element) && token === "fillcolor3"

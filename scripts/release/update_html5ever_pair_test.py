@@ -67,18 +67,25 @@ class UpdateHtml5everPairTest(unittest.TestCase):
 
     def test_depends_update_all_runs_pair_update_after_broad_upgrade(self) -> None:
         justfile = (ROOT / "Justfile").read_text(encoding="utf-8")
-        recipe = justfile.split("depends-update-all:\n", maxsplit=1)[1].split("\n\n", maxsplit=1)[0]
+        public_recipe = justfile.split("depends-update-all:\n", maxsplit=1)[1].split("\n\n", maxsplit=1)[0]
+        public_commands = [line.strip() for line in public_recipe.splitlines() if line.strip()]
+        self.assertEqual(
+            public_commands[:2],
+            ["python3 scripts/hooks/run_locked_command.py --protect-root-producer -- just depends-update-mutations", "just check"],
+        )
+        recipe = justfile.split("depends-update-mutations:\n", maxsplit=1)[1].split("\n\n", maxsplit=1)[0]
         commands = [line.strip() for line in recipe.splitlines() if line.strip()]
         broad_upgrade_index = next(index for index, line in enumerate(commands) if "{{CARGO}} upgrade " in line)
         pair_update_index = next(index for index, line in enumerate(commands) if "update_html5ever_pair.py" in line)
         lock_update_index = next(index for index, line in enumerate(commands) if line == "{{CARGO}} update")
-        self.assertEqual(commands[broad_upgrade_index], "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa")
+        self.assertEqual(commands[broad_upgrade_index], "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa --exclude harfrust --exclude skia-safe --exclude katana-ast-lint")
         self.assertEqual(sum("{{CARGO}} upgrade " in line for line in commands), 1)
         self.assertEqual(sum("update_html5ever_pair.py" in line for line in commands), 1)
         self.assertEqual(sum(line == "{{CARGO}} update" for line in commands), 1)
         self.assertLess(broad_upgrade_index, pair_update_index)
         self.assertLess(pair_update_index, lock_update_index)
         self.assertNotIn("markup5ever_rcdom", commands[broad_upgrade_index])
+        self.assertNotIn("just check", commands)
 
 
 if __name__ == "__main__":

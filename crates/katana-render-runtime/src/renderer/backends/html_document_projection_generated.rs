@@ -28,10 +28,17 @@ impl InteractiveElementProjection<'_> {
         host_node_id: u64,
         pseudo_element: CssPseudoElement,
         hovered: bool,
+        focused: bool,
+        focus_visible: bool,
         inheritance_ancestors: &[CssAncestor],
     ) -> Option<HtmlDocumentNode> {
-        let (attributes, content) =
-            self.resolve_pseudo_style(pseudo_element, hovered, inheritance_ancestors)?;
+        let (attributes, content) = self.resolve_pseudo_style(
+            pseudo_element,
+            hovered,
+            focused,
+            focus_visible,
+            inheritance_ancestors,
+        )?;
         let slot = self.pseudo_slot(pseudo_element);
         Some(projected_pseudo_node(
             host_node_id,
@@ -46,6 +53,8 @@ impl InteractiveElementProjection<'_> {
         &self,
         pseudo_element: CssPseudoElement,
         hovered: bool,
+        focused: bool,
+        focus_visible: bool,
         inheritance_ancestors: &[CssAncestor],
     ) -> Option<(HtmlAttributes, CssGeneratedContent)> {
         let CssPseudoStyle {
@@ -57,7 +66,11 @@ impl InteractiveElementProjection<'_> {
             ancestors: self.ancestors,
             inheritance_ancestors,
             sibling_index: self.sibling_index,
+            sibling_type_index: self.sibling_type_index,
+            sibling_type_count: self.sibling_type_count,
             hovered,
+            focused,
+            focus_visible,
             pseudo_element,
         })?;
         Some((attributes, content))
@@ -248,8 +261,30 @@ mod tests {
 
     #[test]
     fn generated_image_data_without_supported_svg_payload_falls_back_to_img_node() {
-        let node = super::generated_image_node(9, 3, "https://example.com/picture.png".to_string());
-        assert!(format!("{node:?}").contains("tag: \"img\""));
+        for source in [
+            "https://example.com/picture.png",
+            "data:image/svg+xml",
+            "data:image/svg+xml;base64,%%%",
+        ] {
+            let document = HtmlDocument::parse(&format!(
+                "<style>.target:after{{content:url('{source}')}}</style><div class=target></div>"
+            ));
+            let nodes = document.interactive_nodes_with_styles(&HashMap::new());
+            let image_attributes = find_element(&nodes, "div")
+                .and_then(html_node_children)
+                .and_then(|children| find_span_with_data_krr_pseudo(children, "after"))
+                .and_then(html_node_children)
+                .and_then(|children| find_element(children, "img"))
+                .and_then(html_node_attributes);
+            assert!(
+                image_attributes.is_some_and(|attributes| {
+                    attributes
+                        .iter()
+                        .any(|(name, value)| name == "src" && value == source)
+                }),
+                "expected generated image to preserve source {source}"
+            );
+        }
     }
 
     #[test]

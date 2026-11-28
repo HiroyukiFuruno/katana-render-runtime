@@ -45,10 +45,7 @@ pub(super) fn container_geometry(
 
 pub(super) fn horizontal_box_geometry(x: f32, width: f32, style: &CssStyle) -> (f32, f32) {
     let available_width = (width - style.margin_left - style.margin_right).max(MIN_LAYOUT_WIDTH);
-    let box_width = style
-        .box_width(available_width)
-        .min(available_width)
-        .max(MIN_LAYOUT_WIDTH);
+    let box_width = style.box_width(available_width).max(MIN_LAYOUT_WIDTH);
     let remaining = (available_width - box_width).max(0.0);
     let auto_count = usize::from(style.margin_left_auto) + usize::from(style.margin_right_auto);
     let auto_share = if auto_count == 0 {

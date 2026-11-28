@@ -1,28 +1,38 @@
-use crate::renderer::backends::html_interactive::document::css_px;
-use crate::renderer::backends::html_interactive::style::value::{
-    css_line_height, css_number, grid_tracks,
-};
-use crate::renderer::backends::html_interactive::style::{CssFloat, CssPosition, CssStyle};
+#[path = "style_declaration_border.rs"]
+mod declaration_border;
 
-const DEFAULT_ROTATION_DEGREES_PER_TURN: f32 = 360.0;
+use super::super::rotation::css_rotation_degrees;
+use crate::renderer::backends::html_interactive::style::value::{css_line_height, css_number};
+use crate::renderer::backends::html_interactive::style::{
+    CssFloat, CssPosition, CssStyle, CssVerticalAlign, normalized_property_name,
+};
 
 impl CssStyle {
+    pub(crate) fn apply_vertical_align(&mut self, value: &str, inherited: CssVerticalAlign) {
+        self.vertical_align = match value.trim().to_ascii_lowercase().as_str() {
+            "baseline" => CssVerticalAlign::Baseline,
+            "top" => CssVerticalAlign::Top,
+            "middle" => CssVerticalAlign::Middle,
+            "bottom" => CssVerticalAlign::Bottom,
+            "inherit" => inherited,
+            "initial" | "unset" => CssVerticalAlign::Baseline,
+            _ => self.vertical_align,
+        };
+    }
+
     pub(crate) fn apply(&mut self, name: &str, value: &str) {
-        match name.to_ascii_lowercase().as_str() {
+        if self.apply_border_declaration(name, value) {
+            return;
+        }
+        match normalized_property_name(name).as_ref() {
             "display" => self.apply_display(value),
             "color" => self.apply_color(value),
             "background" | "background-color" => self.apply_background(value),
             "box-shadow" => self.apply_box_shadow(value),
             "opacity" => self.apply_opacity(value),
-            "border" => self.apply_border(value),
-            "border-color" => self.apply_border_color(value),
-            "border-top" | "border-right" | "border-bottom" | "border-left" => {
-                self.apply_border_side(name, value)
+            "border-collapse" => {
+                self.border_collapse = value.trim().eq_ignore_ascii_case("collapse");
             }
-            "border-top-color"
-            | "border-right-color"
-            | "border-bottom-color"
-            | "border-left-color" => self.apply_border_side_color(name, value),
             "position" => self.apply_position(value),
             "float" => self.apply_float(value),
             "appearance" | "-webkit-appearance" => self.apply_appearance(value),
@@ -115,9 +125,13 @@ impl CssStyle {
         if self.apply_box_property(name, value) || self.apply_typography_property(name, value) {
             return;
         }
+        if self.apply_multicolumn_property(name, value) {
+            return;
+        }
         match name.to_ascii_lowercase().as_str() {
             "line-height" => self.apply_line_height(value),
-            "gap" => self.gap = css_px(value).unwrap_or(self.gap),
+            "gap" => self.apply_gap(value),
+            "row-gap" => self.apply_row_gap(value),
             "flex-direction" => {
                 self.flex_direction = value.parse().unwrap_or(self.flex_direction);
             }
@@ -129,10 +143,6 @@ impl CssStyle {
             "align-items" => self.align_items = value.parse().ok().or(self.align_items),
             "justify-content" => {
                 self.justify_content = value.parse().ok().or(self.justify_content);
-            }
-            "grid-template-columns" => {
-                self.grid_template_columns = grid_tracks(value, self.font_size)
-                    .unwrap_or_else(|| self.grid_template_columns.clone());
             }
             _ => {}
         }
@@ -149,29 +159,13 @@ impl CssStyle {
         };
         self.line_height = resolved;
         self.line_height_factor = inherited_factor;
+        self.normal_line_height = value.trim().eq_ignore_ascii_case("normal");
     }
-}
-
-fn css_rotation_degrees(value: &str) -> Option<f32> {
-    let value = value
-        .strip_prefix("rotate(")?
-        .strip_suffix(')')?
-        .trim()
-        .to_ascii_lowercase();
-    let rotation = if let Some(degrees) = value.strip_suffix("deg") {
-        degrees.trim().parse::<f32>().ok()?
-    } else if let Some(turns) = value.strip_suffix("turn") {
-        turns.trim().parse::<f32>().ok()? * DEFAULT_ROTATION_DEGREES_PER_TURN
-    } else {
-        let radians = value.strip_suffix("rad")?;
-        radians.trim().parse::<f32>().ok()?.to_degrees()
-    };
-    rotation.is_finite().then_some(rotation)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::css_rotation_degrees;
+    use super::super::super::rotation::css_rotation_degrees;
     use crate::renderer::backends::html_interactive::style::CssStyle;
 
     #[test]
@@ -246,5 +240,48 @@ mod tests {
     #[test]
     fn css_rotation_unknown_unit_returns_none() {
         assert!(css_rotation_degrees("rotate(1foo)").is_none());
+    }
+
+    #[test]
+    fn columns_shorthand_and_break_inside_are_parsed() {
+        let inherited = CssStyle::browser_default();
+        let style = CssStyle::from_attributes(
+            &[(
+                "style".to_string(),
+                "columns: 2 280px; column-gap: 32px; break-inside: avoid".to_string(),
+            )],
+            &inherited,
+        );
+
+        assert_eq!(style.column_count, Some(2));
+        assert_eq!(style.column_width, Some(280.0));
+        assert_eq!(style.column_gap, 32.0);
+        assert!(style.break_inside_avoid);
+    }
+
+    #[test]
+    fn border_collapse_parses_as_a_table_layout_flag() {
+        let inherited = CssStyle::browser_default();
+        let collapsed = CssStyle::from_attributes(
+            &[("style".to_string(), "border-collapse:collapse".to_string())],
+            &inherited,
+        );
+        let separate = CssStyle::from_attributes(
+            &[("style".to_string(), "border-collapse:separate".to_string())],
+            &collapsed,
+        );
+
+        assert!(collapsed.border_collapse);
+        assert!(!separate.border_collapse);
+    }
+
+    #[test]
+    fn row_gap_normal_resets_only_row_gap() {
+        let mut style = CssStyle::browser_default();
+        style.row_gap = Some(12.0);
+
+        style.apply("row-gap", "normal");
+
+        assert_eq!(style.row_gap, Some(0.0));
     }
 }

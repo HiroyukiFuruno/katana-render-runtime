@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import cast
 
 from local_review_state import ReviewError, digest
 
@@ -51,44 +51,45 @@ input_sha256 は与えた値をそのまま返し、schemaに従うJSONのみを
 """
 
 
-def exact_keys(value: Any, keys: set[str], label: str) -> dict[str, Any]:
+def exact_keys(value: object, keys: set[str], label: str) -> dict[str, object]:
     if not isinstance(value, dict) or set(value) != keys:
         raise ReviewError(f"invalid {label} fields")
-    return value
+    return cast("dict[str, object]", value)
 
 
-def nonempty(value: Any, label: str) -> str:
+def nonempty(value: object, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ReviewError(f"missing {label}")
     return value
 
 
-def evidence_list(value: Any) -> None:
+def evidence_list(value: object) -> None:
     if not isinstance(value, list) or not value:
         raise ReviewError("review evidence is missing")
     for item in value:
-        exact_keys(item, {"source", "quote", "observation"}, "evidence")
+        item = exact_keys(item, {"source", "quote", "observation"}, "evidence")
         for field in ("source", "quote", "observation"):
             nonempty(item[field], field)
 
 
-def validate_review(review: Any, inputs: dict[str, Any]) -> None:
+def validate_review(review: object, inputs: dict[str, object]) -> None:
     if inputs.get("model") != MODEL or inputs.get("reasoning") != REASONING:
         raise ReviewError("unexpected review model or reasoning")
-    exact_keys(review, {"input_sha256", "verdict", "summary", "full_quality_gate", "pending",
+    review = exact_keys(review, {"input_sha256", "verdict", "summary", "full_quality_gate", "pending",
                         "checks", "issues", "findings"}, "review")
     if review["input_sha256"] != digest(inputs):
         raise ReviewError("review is bound to another input")
     if review["verdict"] != "PASS" or review["full_quality_gate"] != "not_run":
         raise ReviewError("review did not pass or claimed a full quality gate")
     nonempty(review["summary"], "summary")
-    if not isinstance(review["pending"], list) or "full_quality_gate" not in review["pending"]:
+    pending = review["pending"]
+    if not isinstance(pending, list) or "full_quality_gate" not in pending:
         raise ReviewError("review must leave the full quality gate pending")
-    for item in review["pending"]:
+    for item in pending:
         nonempty(item, "pending stage")
-    exact_keys(review["checks"], set(CHECKS), "review checks")
-    for check in review["checks"].values():
-        exact_keys(check, {"result", "reason", "evidence"}, "review check")
+    checks = exact_keys(review["checks"], set(CHECKS), "review checks")
+    for check_value in checks.values():
+        check = exact_keys(check_value, {"result", "reason", "evidence"}, "review check")
         if check["result"] not in {"verified", "not_applicable"}:
             raise ReviewError("review contains an unverified check")
         nonempty(check["reason"], "check reason")
@@ -97,13 +98,17 @@ def validate_review(review: Any, inputs: dict[str, Any]) -> None:
     validate_findings(review["findings"])
 
 
-def validate_issues(value: Any, issues: list[dict[str, Any]]) -> None:
-    if not isinstance(value, list) or len(value) != len(issues):
+def validate_issues(value: object, issues: object) -> None:
+    if not isinstance(value, list) or not isinstance(issues, list) or len(value) != len(issues):
         raise ReviewError("review does not cover each Issue")
-    expected = {issue["number"]: issue for issue in issues}
-    seen = set()
-    for item in value:
-        exact_keys(item, {"number", "body_sha256", "result", "evidence"}, "Issue review")
+    expected: dict[int, dict[str, object]] = {}
+    for issue in issues:
+        if not isinstance(issue, dict) or type(issue.get("number")) is not int:
+            raise ReviewError("invalid Issue identity")
+        expected[issue["number"]] = issue
+    seen: set[int] = set()
+    for item_value in value:
+        item = exact_keys(item_value, {"number", "body_sha256", "result", "evidence"}, "Issue review")
         number = item["number"]
         if type(number) is not int or number not in expected or number in seen:
             raise ReviewError("invalid or duplicate Issue review")
@@ -113,11 +118,11 @@ def validate_issues(value: Any, issues: list[dict[str, Any]]) -> None:
         evidence_list(item["evidence"])
 
 
-def validate_findings(value: Any) -> None:
+def validate_findings(value: object) -> None:
     if not isinstance(value, list):
         raise ReviewError("invalid findings")
-    for finding in value:
-        exact_keys(finding, {"priority", "blocking", "status", "title", "reason", "evidence"}, "finding")
+    for finding_value in value:
+        finding = exact_keys(finding_value, {"priority", "blocking", "status", "title", "reason", "evidence"}, "finding")
         priority = finding["priority"]
         if priority not in {"P0", "P1", "P2", "P3"} or type(finding["blocking"]) is not bool:
             raise ReviewError("invalid finding priority")
@@ -135,8 +140,8 @@ def validate_findings(value: Any) -> None:
         evidence_list(finding["evidence"])
 
 
-def receipt_payload(inputs: dict[str, Any], review: dict[str, Any],
-                    reviewed_head_sha: str) -> dict[str, Any]:
+def receipt_payload(inputs: dict[str, object], review: dict[str, object],
+                    reviewed_head_sha: str) -> dict[str, object]:
     provenance = {"reviewed_head_sha": reviewed_head_sha}
     validate_provenance(provenance)
     payload = {"schema": 2, "inputs": inputs, "review": review,
@@ -144,18 +149,18 @@ def receipt_payload(inputs: dict[str, Any], review: dict[str, Any],
     return {**payload, "sha256": digest(payload)}
 
 
-def validate_provenance(value: Any) -> dict[str, str]:
+def validate_provenance(value: object) -> dict[str, str]:
     provenance = exact_keys(value, {"reviewed_head_sha"}, "receipt provenance")
     head_sha = provenance["reviewed_head_sha"]
     if not isinstance(head_sha, str) or len(head_sha) not in (40, 64):
         raise ReviewError("invalid receipt reviewed HEAD SHA")
     if any(character not in "0123456789abcdef" for character in head_sha):
         raise ReviewError("invalid receipt reviewed HEAD SHA")
-    return provenance
+    return {"reviewed_head_sha": head_sha}
 
 
-def validate_receipt(receipt: Any, inputs: dict[str, Any]) -> dict[str, Any]:
-    exact_keys(receipt, {"schema", "inputs", "review", "provenance", "sha256"}, "receipt")
+def validate_receipt(receipt: object, inputs: dict[str, object]) -> dict[str, object]:
+    receipt = exact_keys(receipt, {"schema", "inputs", "review", "provenance", "sha256"}, "receipt")
     if type(receipt["schema"]) is not int or receipt["schema"] != 2:
         raise ReviewError("unsupported receipt schema")
     validate_provenance(receipt["provenance"])
@@ -164,5 +169,6 @@ def validate_receipt(receipt: Any, inputs: dict[str, Any]) -> dict[str, Any]:
         raise ReviewError("receipt integrity check failed")
     if receipt["inputs"] != inputs:
         raise ReviewError("stale receipt is bound to another input")
-    validate_review(receipt["review"], receipt["inputs"])
-    return receipt["review"]
+    review = receipt["review"]
+    validate_review(review, inputs)
+    return cast("dict[str, object]", review)

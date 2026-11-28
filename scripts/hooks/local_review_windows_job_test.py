@@ -1,26 +1,38 @@
 from __future__ import annotations
 
 import json
+import ctypes
+import io
+import errno
 import os
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import local_review_windows_job as job_runner
 from local_review_lock import review_lock
 from local_review_state import ReviewError
 
 
+if TYPE_CHECKING:
+    _Event = str | tuple[str, object] | tuple[str, object, object]
+
+
 class _FakeJob:
-    def __init__(self, events: list[object], assign_error: Exception | None = None) -> None:
+    def __init__(self, events: list[_Event], assign_error: Exception | None = None) -> None:
         self.events = events
         self.assign_error = assign_error
 
-    def assign(self, handle: int) -> None:
-        self.events.append(("assign", handle))
+    def assign(self, process_handle: object) -> None:
+        self.events.append(("assign", process_handle))
         if self.assign_error:
             raise self.assign_error
 
@@ -35,7 +47,7 @@ class _FakeJob:
 
 
 class _FakeHandle:
-    def __init__(self, events: list[object]) -> None:
+    def __init__(self, events: list[_Event]) -> None:
         self.events = events
 
     def Close(self) -> None:
@@ -43,7 +55,7 @@ class _FakeHandle:
 
 
 class _FakeStdin:
-    def __init__(self, events: list[object]) -> None:
+    def __init__(self, events: list[_Event]) -> None:
         self.events = events
 
     def close(self) -> None:
@@ -51,29 +63,92 @@ class _FakeStdin:
 
 
 class _FakeProcess:
-    def __init__(self, events: list[object], communicate_results: list[object]) -> None:
+    def __init__(self, events: list[_Event], communicate_results: list[object], exit_code: object = 0) -> None:
         self.events = events
         self._handle = _FakeHandle(events)
         self.stdin = _FakeStdin(events)
         self.communicate_results = communicate_results
-        self.returncode = None
+        self.returncode: object = None
+        self.exit_code = exit_code
         self.killed = False
 
-    def communicate(self, input: str | None = None, timeout: float | None = None):
+    def communicate(self, input: str | None = None, timeout: float | None = None) -> object:
         self.events.append(("communicate", input, timeout))
         result = self.communicate_results.pop(0)
         if isinstance(result, BaseException):
             raise result
-        self.returncode = 0
+        self.returncode = self.exit_code
         return result
 
-    def poll(self):
+    def poll(self) -> object:
         return self.returncode
 
     def kill(self) -> None:
         self.events.append("kill")
         self.killed = True
         self.returncode = -9
+
+
+class _FakeKernelFunction:
+    def __init__(self, name: str, events: list[tuple[str, tuple[object, ...]]], result: object = 1) -> None:
+        self.name = name
+        self.events = events
+        self.result = result
+        self.argtypes: list[type[object]] | None = None
+        self.restype: type[object] | None = None
+
+    def __call__(self, *arguments: object) -> object:
+        self.events.append((self.name, arguments))
+        return self.result
+
+
+class _FakeKernel32:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, tuple[object, ...]]] = []
+        self.CreateJobObjectW = _FakeKernelFunction("create", self.events, 73)
+        self.SetInformationJobObject = _FakeKernelFunction("set", self.events)
+        self.AssignProcessToJobObject = _FakeKernelFunction("assign", self.events)
+        self.TerminateJobObject = _FakeKernelFunction("terminate", self.events)
+        self.QueryInformationJobObject = _FakeKernelFunction("query", self.events)
+        self.CloseHandle = _FakeKernelFunction("close", self.events)
+
+
+class _LazyKernel32:
+    def __init__(self, kernel32: _FakeKernel32) -> None:
+        self.kernel32 = kernel32
+
+    def __getattr__(self, name: str) -> object:
+        function: object = getattr(self.kernel32, name)
+        setattr(self, name, function)
+        return function
+
+
+@contextmanager
+def windows_ctypes_fixture(
+    kernel32: object, *, last_error: object = 5, error_result: object = OSError("native error"),
+) -> Iterator[None]:
+    def library(name: str, *, use_last_error: bool) -> object:
+        if name != "kernel32" or not use_last_error:
+            raise AssertionError("kernel32 must retain use_last_error")
+        return kernel32
+
+    def win_error(code: int) -> object:
+        if code != last_error:
+            raise AssertionError("WinError must use the native last-error code")
+        return error_result
+
+    with patch.object(os, "name", "nt"), \
+            patch.object(ctypes, "WinDLL", library, create=True), \
+            patch.object(ctypes, "get_last_error", lambda: last_error, create=True), \
+            patch.object(ctypes, "WinError", win_error, create=True):
+        yield
+
+
+@runtime_checkable
+class _WaitApi(Protocol):
+    OpenProcess: job_runner._KernelFunction
+    WaitForSingleObject: job_runner._KernelFunction
+    CloseHandle: job_runner._KernelFunction
 
 
 
@@ -112,11 +187,11 @@ def review_programs(root: Path) -> tuple[str, str]:
 
 
 class WindowsJobRunnerUnitTest(unittest.TestCase):
-    def run_fake(self, process: _FakeProcess, job: _FakeJob):
+    def run_fake(self, process: _FakeProcess, job: _FakeJob) -> tuple[int, list[_Event]]:
         events = process.events
 
-        def popen(arguments, **kwargs):
-            events.append(("launch", arguments, kwargs))
+        def popen(args: list[str], **kwargs: object) -> _FakeProcess:
+            events.append(("launch", args, kwargs))
             return process
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -135,7 +210,7 @@ class WindowsJobRunnerUnitTest(unittest.TestCase):
             compile(program, "<windows integration -c>", "exec")
 
     def test_assigns_launcher_before_sending_review_request_then_reaps_job(self) -> None:
-        events: list[object] = []
+        events: list[_Event] = []
         process = _FakeProcess(events, [(None, None), (None, None)])
         result, events = self.run_fake(process, _FakeJob(events))
 
@@ -148,12 +223,14 @@ class WindowsJobRunnerUnitTest(unittest.TestCase):
         self.assertLess(names.index("handle-close"), names.index("empty"))
         self.assertLess(names.index("empty"), names.index("close"))
         launch = next(event for event in events if isinstance(event, tuple) and event[0] == "launch")
+        assert len(launch) == 3 and isinstance(launch[2], dict)
         self.assertEqual(launch[2]["stdin"], subprocess.PIPE)
         payload = next(event[1] for event in events if isinstance(event, tuple) and event[0] == "communicate")
+        assert isinstance(payload, str)
         self.assertEqual(json.loads(payload), {"arguments": ["codex", "exec"], "prompt": "fixed prompt"})
 
     def test_timeout_terminates_job_before_reaping_launcher(self) -> None:
-        events: list[object] = []
+        events: list[_Event] = []
         timeout = subprocess.TimeoutExpired("launcher", 17)
         process = _FakeProcess(events, [timeout, (None, None)])
         job = _FakeJob(events)
@@ -167,13 +244,13 @@ class WindowsJobRunnerUnitTest(unittest.TestCase):
         self.assertLess(names.index("empty"), names.index("close"))
 
     def test_job_initialization_failure_does_not_start_launcher(self) -> None:
-        events: list[object] = []
+        events: list[_Event] = []
         process = _FakeProcess(events, [(None, None), (None, None)])
 
-        def fail_job():
+        def fail_job() -> _FakeJob:
             raise RuntimeError("job creation failed")
 
-        def popen(arguments, **kwargs):
+        def popen(args: list[str], **kwargs: object) -> _FakeProcess:
             events.append("launch")
             return process
 
@@ -187,7 +264,7 @@ class WindowsJobRunnerUnitTest(unittest.TestCase):
         self.assertNotIn("launch", events)
 
     def test_terminate_failure_closes_job_before_reaping_launcher(self) -> None:
-        events: list[object] = []
+        events: list[_Event] = []
         process = _FakeProcess(events, [(None, None), (None, None)])
         job = _FakeJob(events)
 
@@ -195,15 +272,14 @@ class WindowsJobRunnerUnitTest(unittest.TestCase):
             events.append("terminate")
             raise OSError("terminate failed")
 
-        job.terminate = fail_terminate
         original_close = job.close
 
         def close_and_kill() -> None:
             original_close()
             process.returncode = -9
 
-        job.close = close_and_kill
-        with self.assertRaisesRegex(OSError, "terminate failed"):
+        with patch.object(job, "terminate", fail_terminate), patch.object(job, "close", close_and_kill), \
+                self.assertRaisesRegex(OSError, "terminate failed"):
             self.run_fake(process, job)
 
         names = [event if isinstance(event, str) else event[0] for event in events]
@@ -213,7 +289,7 @@ class WindowsJobRunnerUnitTest(unittest.TestCase):
         self.assertIn("handle-close", names)
 
     def test_assignment_failure_kills_unassigned_launcher_without_sending_payload(self) -> None:
-        events: list[object] = []
+        events: list[_Event] = []
         process = _FakeProcess(events, [(None, None), (None, None)])
         job = _FakeJob(events, RuntimeError("assignment failed"))
         with self.assertRaisesRegex(RuntimeError, "assignment failed"):
@@ -228,13 +304,189 @@ class WindowsJobRunnerUnitTest(unittest.TestCase):
         self.assertIn("close", names)
         self.assertLess(names.index("handle-close"), names.index("empty"))
 
+    def test_noninteger_launcher_exit_code_rejects_and_cleans_job(self) -> None:
+        for code in (None, True, "0", object()):
+            with self.subTest(code=code):
+                events: list[_Event] = []
+                process = _FakeProcess(events, [(None, None), (None, None)], code)
+                with self.assertRaisesRegex(TypeError, "launcher exit code"):
+                    self.run_fake(process, _FakeJob(events))
+                self.assertEqual(events[-3:], ["handle-close", "empty", "close"])
+
+    def test_launcher_rejects_invalid_request_without_starting_review(self) -> None:
+        requests = ("[", "null", "{}", '{"arguments":"codex","prompt":"p"}',
+                    '{"arguments":[1],"prompt":"p"}', '{"arguments":["codex"],"prompt":1}')
+        for request in requests:
+            with self.subTest(request=request), patch.object(sys, "stdin", io.StringIO(request)), \
+                    patch("local_review_windows_job.subprocess.run") as launch:
+                self.assertEqual(job_runner._launcher(), 2)
+                launch.assert_not_called()
+
+    def test_launcher_preserves_arguments_utf8_prompt_and_exit_code(self) -> None:
+        args = ["codex", "exec"]
+        request = json.dumps({"arguments": args, "prompt": "日本語 review"})
+        with patch.object(sys, "stdin", io.StringIO(request)), \
+                patch("local_review_windows_job.subprocess.run", return_value=subprocess.CompletedProcess(args, 7)) as launch:
+            self.assertEqual(job_runner._launcher(), 7)
+            launch.assert_called_once_with(
+                args, input="日本語 review", text=True, encoding="utf-8", stdout=subprocess.DEVNULL,
+            )
+
+
+class WindowsApiBoundaryUnitTest(unittest.TestCase):
+    def test_nonwindows_job_api_is_unavailable_without_loading_library(self) -> None:
+        with patch.object(os, "name", "posix"), patch.object(ctypes, "WinDLL", create=True) as library:
+            with self.assertRaisesRegex(OSError, "Job Objects are unavailable"):
+                job_runner._JobApi()
+            library.assert_not_called()
+
+    def test_kernel_binding_preserves_types_arguments_and_cleanup_order(self) -> None:
+        kernel32 = _FakeKernel32()
+        lazy_kernel32 = _LazyKernel32(kernel32)
+        with windows_ctypes_fixture(lazy_kernel32):
+            job = job_runner._JobApi()
+            self.assertEqual(kernel32.CreateJobObjectW.argtypes, [ctypes.c_void_p, ctypes.c_wchar_p])
+            self.assertIs(kernel32.CreateJobObjectW.restype, ctypes.c_void_p)
+            signatures = (
+                (kernel32.SetInformationJobObject, [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]),
+                (kernel32.AssignProcessToJobObject, [ctypes.c_void_p, ctypes.c_void_p]),
+                (kernel32.TerminateJobObject, [ctypes.c_void_p, ctypes.c_uint32]),
+                (kernel32.QueryInformationJobObject, [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p,
+                                                    ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]),
+                (kernel32.CloseHandle, [ctypes.c_void_p]),
+            )
+            for function, arguments in signatures:
+                self.assertEqual(function.argtypes, arguments)
+                self.assertIs(function.restype, ctypes.c_int)
+            limits: object = getattr(kernel32.events[1][1][2], "_obj", None)
+            assert isinstance(limits, job_runner._ExtendedLimitInformation)
+            self.assertEqual(limits.BasicLimitInformation.LimitFlags, job_runner.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
+            job.assign(91)
+            job.terminate()
+            job.wait_empty()
+            job.close()
+            job.close()
+        self.assertEqual([name for name, _ in kernel32.events], ["create", "set", "assign", "terminate", "query", "close"])
+        self.assertEqual(kernel32.events[0][1], (None, None))
+        self.assertEqual(kernel32.events[1][1][:2], (73, job_runner.JOB_OBJECT_EXTENDED_LIMIT_INFORMATION))
+        self.assertEqual(kernel32.events[1][1][3], ctypes.sizeof(job_runner._ExtendedLimitInformation))
+        self.assertEqual(kernel32.events[2][1], (73, 91))
+        self.assertEqual(kernel32.events[3][1], (73, 1))
+        self.assertEqual(kernel32.events[4][1][:2], (73, job_runner.JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION))
+        self.assertEqual(kernel32.events[4][1][3:], (ctypes.sizeof(job_runner._BasicAccountingInformation), None))
+        self.assertEqual(kernel32.events[5][1], (73,))
+        self.assertIsNone(job.handle)
+
+    def test_invalid_handles_reject_before_configuring_limits(self) -> None:
+        for handle in (True, "73", object()):
+            kernel32 = _FakeKernel32()
+            kernel32.CreateJobObjectW.result = handle
+            with self.subTest(handle=handle), windows_ctypes_fixture(kernel32):
+                with self.assertRaisesRegex(TypeError, "Job Object handle"):
+                    job_runner._JobApi()
+                self.assertEqual([name for name, _ in kernel32.events], ["create"])
+
+    def test_invalid_last_error_or_error_object_is_rejected(self) -> None:
+        scenarios = ((True, OSError(), "last-error code"), ("5", OSError(), "last-error code"),
+                     (object(), OSError(), "last-error code"), (5, None, "Windows error"),
+                     (5, "error", "Windows error"))
+        for field, expected_calls in (("CreateJobObjectW", ["create"]),
+                                      ("SetInformationJobObject", ["create", "set", "close"])):
+            for code, error, message in scenarios:
+                kernel32 = _FakeKernel32()
+                function: object = getattr(kernel32, field)
+                assert isinstance(function, _FakeKernelFunction)
+                function.result = 0
+                with self.subTest(field=field, code=code, error=error), \
+                        windows_ctypes_fixture(kernel32, last_error=code, error_result=error):
+                    with self.assertRaisesRegex(TypeError, message):
+                        job_runner._JobApi()
+                    self.assertEqual([name for name, _ in kernel32.events], expected_calls)
+
+    def test_native_error_identity_and_failed_setup_cleanup_are_preserved(self) -> None:
+        for field, expected_calls in (("CreateJobObjectW", ["create"]),
+                                      ("SetInformationJobObject", ["create", "set", "close"])):
+            kernel32 = _FakeKernel32()
+            failure = OSError(5, "native denied")
+            with self.subTest(field=field), windows_ctypes_fixture(kernel32, error_result=failure):
+                function: object = getattr(kernel32, field)
+                assert isinstance(function, _FakeKernelFunction)
+                function.result = 0
+                with self.assertRaises(OSError) as rejected:
+                    job_runner._JobApi()
+                self.assertIs(rejected.exception, failure)
+                self.assertEqual([name for name, _ in kernel32.events], expected_calls)
+
+    def test_noncallable_windows_api_or_kernel_function_is_rejected(self) -> None:
+        for field in ("WinDLL", "WinError", "get_last_error"):
+            kernel32 = _FakeKernel32()
+            with self.subTest(field=field), windows_ctypes_fixture(kernel32), \
+                    patch.object(ctypes, field, object()):
+                with self.assertRaisesRegex(OSError, "ctypes API is unavailable"):
+                    job_runner._JobApi()
+                self.assertFalse(kernel32.events)
+        kernel32 = _FakeKernel32()
+        with windows_ctypes_fixture(kernel32), patch.object(kernel32, "CloseHandle", object()):
+            with self.assertRaisesRegex(TypeError, "invalid kernel32 function"):
+                job_runner._JobApi()
+            self.assertFalse(kernel32.events)
+
+    def test_windows_lock_keeps_native_arguments_and_closes_descriptor_on_rejection(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            lock = Path(temporary) / "review.lock"
+            calls: list[tuple[int, int, int]] = []
+
+            def locking(descriptor: int, mode: int, count: int) -> None:
+                calls.append((descriptor, mode, count))
+
+            module = SimpleNamespace(LK_NBLCK=2, locking=locking)
+            with patch.dict(sys.modules, {"msvcrt": module}), patch.object(os, "name", "nt"):
+                with review_lock(lock):
+                    os.fstat(calls[0][0])
+                self.assertEqual(calls[0][1:], (2, 1))
+                with self.assertRaises(OSError):
+                    os.fstat(calls[0][0])
+            invalid_modules = (SimpleNamespace(LK_NBLCK=True, locking=locking),
+                               SimpleNamespace(LK_NBLCK="2", locking=locking),
+                               SimpleNamespace(LK_NBLCK=2, locking=object()))
+            for invalid in invalid_modules:
+                with self.subTest(module=invalid), patch.dict(sys.modules, {"msvcrt": invalid}), \
+                        patch.object(os, "name", "nt"), patch("local_review_lock.os.close", wraps=os.close) as close:
+                    with self.assertRaisesRegex(OSError, "file-lock API is unavailable"):
+                        with review_lock(lock):
+                            self.fail("invalid lock API admitted review")
+                    close.assert_called_once()
+
+    def test_windows_lock_reports_contention_and_closes_descriptor(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            lock = Path(temporary) / "review.lock"
+            for code in (errno.EACCES, errno.EAGAIN, errno.EBADF):
+                def locking(descriptor: int, mode: int, count: int, error_code: int = code) -> None:
+                    raise OSError(error_code, "native locking failure")
+
+                module = SimpleNamespace(LK_NBLCK=2, locking=locking)
+                expected = OSError if code == errno.EBADF else ReviewError
+                with self.subTest(code=code), patch.dict(sys.modules, {"msvcrt": module}), \
+                        patch.object(os, "name", "nt"), patch("local_review_lock.os.close", wraps=os.close) as close:
+                    with self.assertRaises(expected):
+                        with review_lock(lock):
+                            self.fail("failed native locking admitted review")
+                    close.assert_called_once()
+
 
 class WindowsJobRunnerIntegrationTest(unittest.TestCase):
     @staticmethod
     def wait_process_exit(pid: int) -> None:
-        import ctypes
-
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        windows_ctypes: object = ctypes
+        if not isinstance(windows_ctypes, job_runner._WindowsCtypes):
+            raise AssertionError("Windows ctypes API is unavailable")
+        kernel32 = windows_ctypes.WinDLL("kernel32", use_last_error=True)
+        for name in ("OpenProcess", "WaitForSingleObject", "CloseHandle"):
+            function: object = getattr(kernel32, name, None)
+            if not isinstance(function, job_runner._KernelFunction) or not callable(function):
+                raise AssertionError("Windows process-wait function is unavailable")
+        if not isinstance(kernel32, _WaitApi):
+            raise AssertionError("Windows process-wait API is unavailable")
         kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
         kernel32.OpenProcess.restype = ctypes.c_void_p
         kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
@@ -242,10 +494,15 @@ class WindowsJobRunnerIntegrationTest(unittest.TestCase):
         kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
         handle = kernel32.OpenProcess(0x00100000, False, pid)
         if not handle:
-            error = ctypes.get_last_error()
+            error = windows_ctypes.get_last_error()
+            if type(error) is not int:
+                raise AssertionError("invalid Windows last-error code")
             if error == 87:  # 87はERROR_INVALID_PARAMETERで、終了済みPIDだけを許容する。
                 return
-            raise ctypes.WinError(error)
+            exception = windows_ctypes.WinError(error)
+            if not isinstance(exception, OSError):
+                raise AssertionError("invalid Windows error")
+            raise exception
         try:
             result = kernel32.WaitForSingleObject(handle, 10_000)
             if result != 0:
@@ -254,8 +511,8 @@ class WindowsJobRunnerIntegrationTest(unittest.TestCase):
             kernel32.CloseHandle(handle)
 
     def execute_review(
-        self, root: Path, *, timeout: float, job_factory=job_runner._JobApi,
-        expected_exception= subprocess.TimeoutExpired,
+        self, root: Path, *, timeout: float, job_factory: Callable[[], job_runner._Job] = job_runner._JobApi,
+        expected_exception: type[Exception] = subprocess.TimeoutExpired,
     ) -> tuple[Path, Path]:
         parent_pid = root / "reviewer.pid"
         child_pid = root / "descendant.pid"

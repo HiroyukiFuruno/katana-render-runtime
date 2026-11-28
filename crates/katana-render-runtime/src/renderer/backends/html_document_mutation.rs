@@ -1,6 +1,6 @@
 use super::HtmlDocument;
-use crate::renderer::backends::html_dom_helpers::{attribute_value, detach, text_content};
-use html5ever::{Attribute, QualName, ns};
+use crate::renderer::backends::html_dom_helpers::{detach, text_content};
+use html5ever::{QualName, ns};
 use markup5ever_rcdom::{Node, NodeData};
 use std::rc::Rc;
 
@@ -36,16 +36,33 @@ impl HtmlDocument {
         if !matches!(parent.data, NodeData::Document | NodeData::Element { .. }) {
             return Err("appendChild target is not a container".to_string());
         }
+        self.clear_select_value_override_for(parent_id);
+        self.clear_select_value_override_for(child_id);
         detach(&child);
         child.parent.set(Some(Rc::downgrade(&parent)));
         parent.children.borrow_mut().push(child);
+        self.advance_tree_revision();
         Ok(())
     }
 
     pub(in crate::renderer::backends) fn remove(&mut self, node_id: u64) -> Result<(), String> {
         let node = self.node(node_id)?;
+        self.clear_select_value_override_for(node_id);
         detach(&node);
+        self.advance_tree_revision();
         Ok(())
+    }
+
+    pub(in crate::renderer::backends) fn append_text(
+        &mut self,
+        parent_id: u64,
+        value: &str,
+    ) -> Result<(), String> {
+        let text = Node::new(NodeData::Text {
+            contents: std::cell::RefCell::new(value.into()),
+        });
+        let child_id = self.register_subtree(&text);
+        self.append_child(parent_id, child_id)
     }
 
     pub(in crate::renderer::backends) fn text_content(
@@ -61,6 +78,9 @@ impl HtmlDocument {
         value: &str,
     ) -> Result<(), String> {
         let node = self.node(node_id)?;
+        if matches!(&node.data, NodeData::Element { name, .. } if name.local.as_str() == "option") {
+            self.clear_select_value_override_for(node_id);
+        }
         let children = std::mem::take(&mut *node.children.borrow_mut());
         for child in children {
             child.parent.set(None);
@@ -71,95 +91,8 @@ impl HtmlDocument {
         text.parent.set(Some(Rc::downgrade(&node)));
         node.children.borrow_mut().push(text.clone());
         self.register_subtree(&text);
+        self.advance_tree_revision();
         Ok(())
-    }
-
-    pub(in crate::renderer::backends) fn attribute(
-        &self,
-        node_id: u64,
-        name: &str,
-    ) -> Result<Option<String>, String> {
-        let node = self.node(node_id)?;
-        let NodeData::Element { attrs, .. } = &node.data else {
-            return Err("attribute target is not an element".to_string());
-        };
-        Ok(attribute_value(&attrs.borrow(), name).map(ToOwned::to_owned))
-    }
-
-    pub(in crate::renderer::backends) fn set_attribute(
-        &mut self,
-        node_id: u64,
-        name: &str,
-        value: &str,
-    ) -> Result<(), String> {
-        let node = self.node(node_id)?;
-        let NodeData::Element { attrs, .. } = &node.data else {
-            return Err("attribute target is not an element".to_string());
-        };
-        let name = name.trim().to_ascii_lowercase();
-        if name.is_empty() {
-            return Err("attribute name is empty".to_string());
-        }
-        let mut attrs = attrs.borrow_mut();
-        if let Some(attribute) = attrs
-            .iter_mut()
-            .find(|attribute| attribute.name.local.as_str() == name)
-        {
-            attribute.value = value.into();
-        } else {
-            attrs.push(Attribute {
-                name: QualName::new(None, Default::default(), name.into()),
-                value: value.into(),
-            });
-        }
-        Ok(())
-    }
-
-    pub(in crate::renderer::backends) fn remove_attribute(
-        &mut self,
-        node_id: u64,
-        name: &str,
-    ) -> Result<(), String> {
-        let node = self.node(node_id)?;
-        let NodeData::Element { attrs, .. } = &node.data else {
-            return Err("attribute target is not an element".to_string());
-        };
-        let name = name.trim().to_ascii_lowercase();
-        if name.is_empty() {
-            return Err("attribute name is empty".to_string());
-        }
-        attrs
-            .borrow_mut()
-            .retain(|attribute| attribute.name.local.as_str() != name);
-        Ok(())
-    }
-
-    pub(in crate::renderer::backends) fn toggle_boolean_attribute(
-        &mut self,
-        node_id: u64,
-        name: &str,
-    ) -> Result<bool, String> {
-        let node = self.node(node_id)?;
-        let NodeData::Element { attrs, .. } = &node.data else {
-            return Err("attribute target is not an element".to_string());
-        };
-        let name = name.trim().to_ascii_lowercase();
-        if name.is_empty() {
-            return Err("attribute name is empty".to_string());
-        }
-        let mut attributes = attrs.borrow_mut();
-        if let Some(index) = attributes
-            .iter()
-            .position(|attribute| attribute.name.local.as_str() == name)
-        {
-            attributes.remove(index);
-            return Ok(false);
-        }
-        attributes.push(Attribute {
-            name: QualName::new(None, Default::default(), name.into()),
-            value: String::new().into(),
-        });
-        Ok(true)
     }
 }
 

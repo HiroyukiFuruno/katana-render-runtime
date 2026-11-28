@@ -1,6 +1,11 @@
 use super::super::html_browser::HtmlBrowserViewport;
 use super::style::CssStyle;
 
+const HALF_PAINT_PIXEL: f32 = 0.5;
+
+#[path = "svg_shadow.rs"]
+mod shadow;
+
 #[path = "svg_border.rs"]
 mod border;
 #[path = "svg_gradient.rs"]
@@ -13,7 +18,7 @@ pub(super) fn svg_header(viewport: HtmlBrowserViewport) -> String {
     let logical_width = viewport.logical_width();
     let logical_height = viewport.logical_height();
     format!(
-        r##"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="0 0 {logical_width} {logical_height}"><rect width="100%" height="100%" fill="#ffffff"/>"##,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="{}" height="{}" viewBox="0 0 {logical_width} {logical_height}"><rect width="100%" height="100%" fill="#ffffff"/>"##,
         viewport.width, viewport.height
     )
 }
@@ -29,36 +34,25 @@ pub(super) fn box_svg(
     if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
         return String::new();
     }
+    let (x, y, width, height) = snapped_box_geometry(x, y, width, height);
     let mut svg = String::new();
-    append_box_shadow(&mut svg, x, y, width, height, style);
+    shadow::append_shadow(&mut svg, gradient_id, (x, y, width, height), style);
     gradient::append_background(&mut svg, gradient_id, x, y, width, height, style);
     border::append_border(&mut svg, x, y, width, height, style);
     svg
 }
 
-fn append_box_shadow(svg: &mut String, x: f32, y: f32, width: f32, height: f32, style: &CssStyle) {
-    const LAYER_OPACITIES: [f32; 8] = [0.10, 0.09, 0.08, 0.07, 0.055, 0.04, 0.03, 0.015];
-    let Some(shadow) = &style.box_shadow else {
-        return;
-    };
-    let radius = style.resolved_border_radius(width, height);
-    for (layer, opacity) in LAYER_OPACITIES.iter().enumerate().rev() {
-        let blur_expansion = shadow.blur_radius * (layer + 1) as f32 / LAYER_OPACITIES.len() as f32;
-        let expansion = shadow.spread_radius + blur_expansion;
-        let shadow_x = x + shadow.offset_x - expansion;
-        let shadow_y = y + shadow.offset_y - expansion;
-        let shadow_width = width + expansion * 2.0;
-        let shadow_height = height + expansion * 2.0;
-        if shadow_width <= 0.0 || shadow_height <= 0.0 {
-            continue;
-        }
-        svg.push_str(&format!(
-            r#"<rect x="{shadow_x}" y="{shadow_y}" width="{shadow_width}" height="{shadow_height}" rx="{}" ry="{}" fill="{}" fill-opacity="{opacity}"/>"#,
-            (radius.0 + expansion).max(0.0),
-            (radius.1 + expansion).max(0.0),
-            escape_xml(&shadow.color),
-        ));
-    }
+/* WHY: Chrome は CSS box の両端を画素境界へ合わせて塗り、layout の小数座標は保持する。 */
+fn snapped_box_geometry(x: f32, y: f32, width: f32, height: f32) -> (f32, f32, f32, f32) {
+    let left = snap_paint_coordinate(x);
+    let top = snap_paint_coordinate(y);
+    let right = snap_paint_coordinate(x + width);
+    let bottom = snap_paint_coordinate(y + height);
+    (left, top, right - left, bottom - top)
+}
+
+pub(super) fn snap_paint_coordinate(value: f32) -> f32 {
+    (value + HALF_PAINT_PIXEL).floor()
 }
 
 pub(super) fn escape_xml(value: &str) -> String {
@@ -74,6 +68,52 @@ pub(super) fn escape_xml(value: &str) -> String {
 mod tests {
     use super::{LinearGradient, box_svg};
     use crate::renderer::backends::html_interactive::style::CssStyle;
+
+    #[test]
+    fn box_paint_snaps_both_edges_without_changing_layout_dimensions() {
+        assert_eq!(
+            super::snapped_box_geometry(10.375, 20.625, 100.25, 50.375),
+            (10.0, 21.0, 101.0, 50.0)
+        );
+        assert_eq!(
+            super::snapped_box_geometry(-0.5, -0.625, 2.0, 2.0),
+            (0.0, -1.0, 2.0, 2.0)
+        );
+        let mut style = CssStyle::browser_default();
+        style.background = Some("#1e293b".to_string());
+        let svg = box_svg(0, 433.09375, 241.578_13, 802.90625, 2.0, &style);
+        assert!(svg.contains(r#"x="433" y="242" width="803" height="2""#));
+    }
+
+    #[test]
+    fn fractional_box_paint_matches_chrome_rows_at_multiple_device_scales()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut style = CssStyle::browser_default();
+        style.background = Some("black".to_string());
+        let painted = box_svg(0, 3.09375, 5.578125, 8.90625, 2.0, &style);
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="white"/>{painted}</svg>"#
+        );
+        for scale in [1.0, 1.5, 2.0] {
+            let image =
+                crate::markdown::svg_rasterize::SvgRasterizeOps::rasterize_svg(&svg, scale)?;
+            let x = (5.0 * scale) as u32;
+            for y in 0..image.height {
+                let start = ((y * image.width + x) * 4) as usize;
+                let expected = if (6.0 * scale..8.0 * scale).contains(&(y as f32)) {
+                    0
+                } else {
+                    255
+                };
+                assert_eq!(
+                    &image.rgba[start..start + 3],
+                    &[expected; 3],
+                    "scale {scale}, row {y}"
+                );
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn linear_gradient_paints_angles_directions_and_distributed_stops() {
@@ -114,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn box_shadow_uses_gaussian_weighted_layers_behind_the_background() {
+    fn box_shadow_blurs_the_original_alpha_behind_the_background() {
         let attributes = [(
             "style".to_string(),
             "box-shadow: 0 10px 28px rgba(15,40,89,0.14)".to_string(),
@@ -123,10 +163,19 @@ mod tests {
         style.background = Some("#ffffff".to_string());
         let svg = box_svg(0, 10.0, 20.0, 100.0, 50.0, &style);
 
-        assert_eq!(svg.matches("fill-opacity=\"").count(), 8, "{svg}");
-        assert!(svg.contains(r#"fill-opacity="0.1""#), "{svg}");
-        assert!(svg.contains(r#"fill-opacity="0.015""#), "{svg}");
-        let paint_order = (svg.find("fill-opacity"), svg.rfind(r##"fill="#ffffff""##));
+        assert!(
+            svg.contains(r#"<feGaussianBlur stdDeviation="14"/>"#),
+            "{svg}"
+        );
+        assert!(
+            svg.contains(r#"color-interpolation-filters="sRGB""#),
+            "{svg}"
+        );
+        assert!(!svg.contains("fill-opacity"), "{svg}");
+        let paint_order = (
+            svg.find("url(#krr-shadow-0)"),
+            svg.rfind(r##"fill="#ffffff""##),
+        );
         assert!(
             matches!(paint_order, (Some(shadow), Some(background)) if shadow < background),
             "{svg}"

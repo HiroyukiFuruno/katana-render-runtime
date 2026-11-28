@@ -1,0 +1,148 @@
+use super::{
+    CreationProof, Database, Fixture, admitted_ttc_face, file_face, fixture_database,
+    write_real_fonts,
+};
+use std::sync::Arc;
+
+#[test]
+fn selected_face_rejects_an_unshared_file_source() -> Result<(), String> {
+    let fixture = Fixture::new()?;
+    let original = fixture.database();
+    let error = fixture.assert_face(&original, fixture.a, fixture.a).err();
+    assert_eq!(error.as_deref(), Some("positive branch is not SharedFile"));
+    Ok(())
+}
+
+#[test]
+fn selected_face_requires_an_active_attempt_for_real_font() -> Result<(), String> {
+    let fixture = Fixture::new()?;
+    let mut database = fixture.database();
+    crate::markdown::svg_rasterize::SvgRasterizeOps::with_html_font_render_scope(|| {
+        assert_eq!(
+            fixture.select(&mut database, fixture.a).err().as_deref(),
+            Some("selected mapping rejected")
+        );
+        assert_eq!(
+            database.faces().count(),
+            fixture.context.original.faces().count()
+        );
+        assert!(!fixture.context.finish(&database));
+
+        let attempt = fixture
+            .context
+            .begin()
+            .ok_or("real font attempt rejected")?;
+        fixture.select(&mut database, fixture.a)?;
+        assert!(fixture.context.finish(&database));
+        drop(attempt);
+        assert!(!fixture.context.finish(&database));
+        Ok(())
+    })
+}
+
+#[test]
+fn missing_font_and_ttc_faces_report_their_specific_errors() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let missing = directory.path().join("missing.ttf");
+    let database = Arc::new(Database::new());
+    let proof = Arc::new(CreationProof::default());
+    assert_eq!(
+        file_face(&database, &missing, "fixture face missing")
+            .err()
+            .as_deref(),
+        Some("fixture face missing")
+    );
+    assert_eq!(
+        admitted_ttc_face(&database, &proof, &missing)
+            .err()
+            .as_deref(),
+        Some("actual TTC nonzero face did not pass existing admission")
+    );
+    Ok(())
+}
+
+#[test]
+fn absent_destination_preserves_the_file_write_error() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let missing_root = directory.path().join("missing");
+    let expected = std::fs::write(missing_root.join("noto.ttf"), b"")
+        .err()
+        .ok_or("unexpected write success")?
+        .to_string();
+    assert_eq!(
+        write_real_fonts(&missing_root).err().as_deref(),
+        Some(expected.as_str())
+    );
+    assert!(!missing_root.exists());
+    Ok(())
+}
+
+#[test]
+fn fixture_creation_rejects_a_file_as_the_temporary_parent() -> Result<(), String> {
+    let parent = tempfile::NamedTempFile::new().map_err(|error| error.to_string())?;
+    let error = Fixture::new_in(parent.path())
+        .err()
+        .ok_or("fixture creation accepted a file as a directory")?;
+    assert!(error.contains(parent.path().to_string_lossy().as_ref()));
+    assert!(parent.path().is_file());
+    Ok(())
+}
+
+#[test]
+fn failed_real_font_copy_preserves_error_and_tempdir_cleanup() -> Result<(), String> {
+    for (destination, source, earlier_file) in [
+        (
+            "arial.ttf",
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "noto.ttf",
+        ),
+        (
+            "helvetica.ttc",
+            "/System/Library/Fonts/Helvetica.ttc",
+            "arial.ttf",
+        ),
+    ] {
+        assert_real_font_copy_failure(destination, source, earlier_file)?;
+    }
+    Ok(())
+}
+
+fn assert_real_font_copy_failure(
+    destination: &str,
+    source: &str,
+    earlier_file: &str,
+) -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let root = directory.path().join("fixture");
+    std::fs::create_dir_all(root.join(destination)).map_err(|error| error.to_string())?;
+    let expected = std::fs::copy(source, root.join(destination))
+        .err()
+        .ok_or("unexpected real-font copy success")?
+        .to_string();
+    assert_eq!(
+        write_real_fonts(&root).err().as_deref(),
+        Some(expected.as_str())
+    );
+    assert!(root.join("noto.ttf").is_file());
+    if earlier_file == "arial.ttf" {
+        assert!(root.join(earlier_file).is_file());
+    }
+    drop(directory);
+    assert!(!root.exists());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_font_path_is_rejected_before_loading() -> Result<(), String> {
+    use std::os::unix::ffi::OsStringExt;
+
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let invalid = directory
+        .path()
+        .join(std::ffi::OsString::from_vec(vec![0xff]));
+    let valid = directory.path().join("valid.ttf");
+    let error = fixture_database(directory.path(), [&invalid, &valid, &valid]).err();
+    assert_eq!(error.as_deref(), Some("fixture path not UTF-8"));
+    Ok(())
+}

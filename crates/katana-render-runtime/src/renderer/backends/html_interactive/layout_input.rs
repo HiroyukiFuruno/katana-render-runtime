@@ -16,7 +16,7 @@ fn input_geometry(
     width: f32,
     style: &super::style::CssStyle,
 ) -> geometry::InputGeometry {
-    geometry::input_geometry(x, y, width, style)
+    geometry::input_geometry(x, y, width, &[], style)
 }
 
 pub(super) fn is_checkbox(attributes: &[(String, String)]) -> bool {

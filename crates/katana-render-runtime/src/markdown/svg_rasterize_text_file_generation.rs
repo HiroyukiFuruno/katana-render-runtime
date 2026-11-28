@@ -1,31 +1,18 @@
 use resvg::usvg::fontdb::{Database, ID, Source};
 
+#[path = "svg_rasterize_text_file_stamp.rs"]
+mod stamp;
+pub(in crate::markdown::svg_rasterize) use stamp::FileStamp;
+#[cfg(windows)]
+pub(super) use stamp::non_durable_file_stamp;
+use stamp::stamp_for_metadata;
+#[cfg(target_os = "macos")]
+pub(in crate::markdown::svg_rasterize) use stamp::stamp_open_font_file;
+
 pub(in super::super) fn observe_file_face_generation(database: &Database, id: ID) -> bool {
     /* WHY: 未選択の候補ファイルの変更も描画の選択結果へ影響する。 */
     let (is_file, stamp, _) = file_source_stamp(database, id);
     !is_file || stamp.is_some()
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct FileStamp {
-    len: u64,
-    modified: Option<std::time::SystemTime>,
-    created: Option<std::time::SystemTime>,
-    #[cfg(unix)]
-    device: u64,
-    #[cfg(unix)]
-    inode: u64,
-    #[cfg(unix)]
-    changed_seconds: i64,
-    #[cfg(unix)]
-    changed_nanoseconds: i64,
-    pub(super) durable_reusable: bool,
-}
-
-impl FileStamp {
-    pub(in super::super) fn durable_reusable(&self) -> bool {
-        self.durable_reusable
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -39,6 +26,14 @@ enum Generation {
 }
 
 impl FontSourceGeneration {
+    #[cfg(all(test, target_os = "macos"))]
+    pub(in crate::markdown::svg_rasterize) fn diagnostic_matches_stamp(
+        &self,
+        stamp: &FileStamp,
+    ) -> bool {
+        stamp.durable_reusable() && matches!(&self.0, Generation::File(current) if current == stamp)
+    }
+
     pub(in super::super) fn reusable(&self) -> bool {
         !matches!(self.0, Generation::Unavailable)
     }
@@ -46,7 +41,7 @@ impl FontSourceGeneration {
     pub(in super::super) fn durable_reusable(&self) -> bool {
         match &self.0 {
             Generation::Immutable => true,
-            Generation::File(stamp) => stamp.durable_reusable,
+            Generation::File(stamp) => stamp.durable_reusable(),
             Generation::Unavailable => false,
         }
     }
@@ -60,8 +55,19 @@ pub(super) fn file_source_stamp(
     database: &Database,
     id: ID,
 ) -> (bool, Option<FileStamp>, FontSourceGeneration) {
+    #[cfg(windows)]
+    if let Some((Source::File(path), _)) = database.face_source(id)
+        && let Some(stamp) = super::stamp_batch::windows_font_snapshot_stamp(path.as_path())
+    {
+        super::stamp_batch::remember_stamp(path.as_path(), stamp.clone());
+        return (
+            true,
+            Some(stamp.clone()),
+            FontSourceGeneration(Generation::File(stamp)),
+        );
+    }
     match database.face_source(id) {
-        Some((Source::File(path), _)) => match stamp_path(&path) {
+        Some((Source::File(path) | Source::SharedFile(path, _), _)) => match stamp_path(&path) {
             Ok(stamp) => (
                 true,
                 Some(stamp.clone()),
@@ -83,8 +89,16 @@ pub(in super::super) fn font_source_generation(
 
 fn stamp_path(path: &std::path::Path) -> Result<FileStamp, ()> {
     if let Some(stamp) = super::stamp_batch::cached_stamp(path) {
+        #[cfg(all(test, target_os = "macos"))]
+        super::super::super::font::observation::count(
+            super::super::super::font::observation::Metric::StampMemoHit,
+        );
         return Ok(stamp);
     }
+    #[cfg(all(test, target_os = "macos"))]
+    super::super::super::font::observation::count(
+        super::super::super::font::observation::Metric::StampMemoMiss,
+    );
     let result = stamp_path_uncached(path);
     match &result {
         Ok(stamp) => super::stamp_batch::remember_stamp(path, stamp.clone()),
@@ -93,12 +107,23 @@ fn stamp_path(path: &std::path::Path) -> Result<FileStamp, ()> {
     result
 }
 
+#[cfg(target_os = "macos")]
+pub(in crate::markdown::svg_rasterize) fn observe_path_stamp(
+    path: &std::path::Path,
+) -> Result<FileStamp, ()> {
+    #[cfg(test)]
+    super::super::super::font::observation::count(
+        super::super::super::font::observation::Metric::PositiveObserve,
+    );
+    stamp_path(path)
+}
+
 pub(in super::super) fn font_source_generation_uncached(
     database: &Database,
     id: ID,
 ) -> FontSourceGeneration {
     match database.face_source(id) {
-        Some((Source::File(path), _)) => FontSourceGeneration(
+        Some((Source::File(path) | Source::SharedFile(path, _), _)) => FontSourceGeneration(
             stamp_path_uncached(&path)
                 .map(Generation::File)
                 .unwrap_or(Generation::Unavailable),
@@ -108,26 +133,17 @@ pub(in super::super) fn font_source_generation_uncached(
     }
 }
 
-pub(super) fn stamp_path_uncached(path: &std::path::Path) -> Result<FileStamp, ()> {
+pub(in crate::markdown::svg_rasterize) fn stamp_path_uncached(
+    path: &std::path::Path,
+) -> Result<FileStamp, ()> {
+    #[cfg(all(test, target_os = "macos"))]
+    super::super::super::font::observation::count(
+        super::super::super::font::observation::Metric::StampMetadata,
+    );
     let metadata = std::fs::metadata(path).map_err(|_| ())?;
-    #[cfg(unix)]
-    use std::os::unix::fs::MetadataExt;
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    let durable_reusable = super::filesystem_policy::durable_reusable(path, metadata.ctime_nsec());
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    let durable_reusable = false;
-    Ok(FileStamp {
-        len: metadata.len(),
-        modified: metadata.modified().ok(),
-        created: metadata.created().ok(),
-        durable_reusable,
-        #[cfg(unix)]
-        device: metadata.dev(),
-        #[cfg(unix)]
-        inode: metadata.ino(),
-        #[cfg(unix)]
-        changed_seconds: metadata.ctime(),
-        #[cfg(unix)]
-        changed_nanoseconds: metadata.ctime_nsec(),
-    })
+    Ok(stamp_for_metadata(path, &metadata))
 }
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_text_sharedfile_generation_tests.rs"]
+mod sharedfile_tests;

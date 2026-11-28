@@ -1,10 +1,11 @@
 use super::DrawioJsRuntimeOps;
+use super::test_support::fake_pixel_svg_bundle;
 use crate::markdown::color_preset::DiagramColorPreset;
 
 #[test]
 fn fake_bundle_limits_aws_crisp_translation_to_supported_non_edge_shapes() {
     let path = temp_runtime_path("krr-drawio-aws-crisp-geometry-unit");
-    assert!(std::fs::write(&path, FAKE_BUNDLE_WITH_AWS_GEOMETRY).is_ok());
+    assert!(std::fs::write(&path, fake_bundle_with_aws_geometry()).is_ok());
 
     let rendered =
         DrawioJsRuntimeOps::render(aws_geometry_source(), &path, DiagramColorPreset::dark());
@@ -44,33 +45,21 @@ fn aws_geometry_source() -> &'static str {
 </root></mxGraphModel>"#
 }
 
-const FAKE_BUNDLE_WITH_AWS_GEOMETRY: &str = r#"
-function Graph() {}
-const Editor = {
-  convertHtmlToText(value) {
-    return String(value);
-  },
-};
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "100px");
-  svg.setAttribute("height", "50px");
-  svg.setAttribute("viewBox", "0 0 100 50");
-  svg.appendChild(createCellGroup("aws", "aws", "rect", 10));
+fn fake_bundle_with_aws_geometry() -> &'static str {
+    static BUNDLE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BUNDLE
+        .get_or_init(|| fake_pixel_svg_bundle("100", "50", AWS_GEOMETRY_BODY, AWS_GEOMETRY_TAIL))
+        .as_str()
+}
+
+const AWS_GEOMETRY_BODY: &str = r#"  svg.appendChild(createCellGroup("aws", "aws", "rect", 10));
   svg.appendChild(createCellGroup("plain", "plain", "rect", 40));
   svg.appendChild(createCellGroup("even", "even", "rect", 40));
   svg.appendChild(createCellGroup("other", "other", "rect", 70));
   svg.appendChild(createCellGroup("edge", "edge", "path", 10));
-  callback({
-    graph: {
-      getSvg() {
-        return svg;
-      },
-    },
-  });
-};
-function createCellGroup(id, kind, tagName, x) {
+"#;
+
+const AWS_GEOMETRY_TAIL: &str = r#"function createCellGroup(id, kind, tagName, x) {
   const outer = document.createElementNS("http://www.w3.org/2000/svg", "g");
   outer.setAttribute("data-cell-id", id);
   const inner = document.createElementNS("http://www.w3.org/2000/svg", "g");

@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from typing import cast
 
 from local_review_contract import MODEL, PROMPT, REASONING, receipt_payload, validate_receipt, validate_review
 from local_review_lock import review_lock
@@ -58,8 +59,27 @@ def arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def json_object(value: object, label: str) -> dict[str, object]:
+    if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
+        raise ReviewError(f"invalid {label} object")
+    return cast("dict[str, object]", value)
+
+
+def input_issue_numbers(inputs: dict[str, object]) -> list[int]:
+    issues = inputs.get("issues")
+    if not isinstance(issues, list) or not issues:
+        raise ReviewError("retained input has no Issue identity")
+    numbers: list[int] = []
+    for issue in issues:
+        number: object = issue.get("number") if isinstance(issue, dict) else None
+        if type(number) is not int or number < 1:
+            raise ReviewError("retained input has invalid Issue identities")
+        numbers.append(number)
+    return numbers
+
+
 def issue_numbers(root: Path, args: argparse.Namespace, receipt: Path) -> list[int]:
-    numbers = args.issue
+    numbers: list[int] = args.issue
     configured = os.environ.get("REVIEW_ISSUE", "")
     if not numbers and configured:
         if not re.fullmatch(r"[1-9][0-9]*(?:[ ,]+[1-9][0-9]*)*", configured):
@@ -72,11 +92,10 @@ def issue_numbers(root: Path, args: argparse.Namespace, receipt: Path) -> list[i
             receipt_numbers: set[int] | None = None
             if receipt.exists():
                 try:
-                    stored = strict_json(receipt.read_text())
-                    read_receipt(receipt, stored["inputs"], root)
-                    stored_issues = stored["inputs"]["issues"]
-                    if isinstance(stored_issues, list):
-                        receipt_numbers = {issue["number"] for issue in stored_issues}
+                    stored = json_object(strict_json(receipt.read_text()), "receipt")
+                    stored_inputs = json_object(stored["inputs"], "receipt inputs")
+                    read_receipt(receipt, stored_inputs, root)
+                    receipt_numbers = set(input_issue_numbers(stored_inputs))
                 except (OSError, ReviewError, KeyError, TypeError):
                     receipt_numbers = None
             if receipt_numbers != references:
@@ -86,13 +105,14 @@ def issue_numbers(root: Path, args: argparse.Namespace, receipt: Path) -> list[i
         base = getattr(args, "base", None) or os.environ.get("REVIEW_BASE")
         retained = retained_inputs(receipt, root=root, base=base)
         if retained is not None:
-            numbers = [issue["number"] for issue in retained["issues"]]
+            numbers = input_issue_numbers(retained)
     if not numbers and receipt.exists():
-        stored = strict_json(receipt.read_text())
+        stored = json_object(strict_json(receipt.read_text()), "receipt")
         try:
-            read_receipt(receipt, stored["inputs"], root)
-            if retained_context_matches(receipt, stored["inputs"], root, base):
-                numbers = [issue["number"] for issue in stored["inputs"]["issues"]]
+            stored_inputs = json_object(stored["inputs"], "receipt inputs")
+            read_receipt(receipt, stored_inputs, root)
+            if retained_context_matches(receipt, stored_inputs, root, base):
+                numbers = input_issue_numbers(stored_inputs)
         except (KeyError, TypeError) as error:
             raise ReviewError("receipt Issue identity is invalid") from error
     if not numbers or any(type(number) is not int or number < 1 for number in numbers):
@@ -100,7 +120,7 @@ def issue_numbers(root: Path, args: argparse.Namespace, receipt: Path) -> list[i
     return sorted(set(numbers))
 
 
-def build_inputs(root: Path, args: argparse.Namespace, numbers: list[int]) -> dict:
+def build_inputs(root: Path, args: argparse.Namespace, numbers: list[int]) -> dict[str, object]:
     remote = getattr(args, "remote", None) or os.environ.get("REVIEW_REMOTE") or "origin"
     remote_name = resolve_remote_name(root, remote)
     base = getattr(args, "base", None) or os.environ.get("REVIEW_BASE") or f"{remote_name}/master"
@@ -126,7 +146,7 @@ def branch_identity(root: Path) -> str | None:
     return branch or None
 
 
-def retained_context_payload(root: Path, inputs: dict, reviewed_head_sha: str) -> dict:
+def retained_context_payload(root: Path, inputs: dict[str, object], reviewed_head_sha: str) -> dict[str, object]:
     context = {
         "schema": 1,
         "branch": branch_identity(root) or "",
@@ -137,12 +157,12 @@ def retained_context_payload(root: Path, inputs: dict, reviewed_head_sha: str) -
 
 
 def retained_context_matches(
-    receipt: Path, stored: dict, root: Path | None, base: str | None = None
+    receipt: Path, stored: dict[str, object], root: Path | None, base: str | None = None
 ) -> bool:
     context_path = receipt.parent / "last-input-context.json"
     if root is None or not context_path.is_file():
         return False
-    context = strict_json(context_path.read_text())
+    context: object = strict_json(context_path.read_text())
     current_branch = branch_identity(root)
     if not isinstance(context, dict) or set(context) != {
         "schema", "branch", "input_sha256", "reviewed_head_sha", "context_sha256"
@@ -185,25 +205,23 @@ def retained_context_matches(
 def retained_inputs(
     receipt: Path, numbers: list[int] | None = None, *, root: Path | None = None,
     base: str | None = None,
-) -> dict | None:
+) -> dict[str, object] | None:
     path = receipt.parent / "last-input.json"
     if not path.exists():
         return None
-    stored = strict_json(path.read_text())
-    issues = stored.get("issues") if isinstance(stored, dict) else None
-    if not isinstance(issues, list) or not issues:
+    stored_value: object = strict_json(path.read_text())
+    if not isinstance(stored_value, dict):
         raise ReviewError("retained input has no Issue identity")
-    if any(not isinstance(issue, dict) or type(issue.get("number")) is not int
-           or issue["number"] < 1 for issue in issues):
-        raise ReviewError("retained input has invalid Issue identities")
-    if numbers is not None and sorted(issue["number"] for issue in issues) != sorted(numbers):
+    stored = json_object(stored_value, "retained input")
+    stored_numbers = input_issue_numbers(stored)
+    if numbers is not None and sorted(stored_numbers) != sorted(numbers):
         return None
     report_path = receipt.parent / "last-review.json"
     if not report_path.is_file():
         # 初回失敗ではCodex起動前にlast-inputだけが残るため、診断原本として保持し、
         # レビュー結果とは扱わず、現在のIssue/requirements指定による再試行を妨げない。
         return None
-    report = strict_json(report_path.read_text())
+    report: object = strict_json(report_path.read_text())
     if not isinstance(report, dict):
         raise ReviewError("retained review is not a structured object")
     if report.get("input_sha256") != digest(stored):
@@ -217,8 +235,11 @@ def retained_inputs(
 
 
 def requirements_path(root: Path, args: argparse.Namespace, receipt: Path, numbers: list[int]) -> str | None:
-    if args.requirements is not None:
-        return args.requirements
+    requested: object = args.requirements
+    if requested is not None:
+        if not isinstance(requested, str):
+            raise ReviewError("requirements path is invalid")
+        return requested
     if "REVIEW_REQUIREMENTS" in os.environ:
         configured = os.environ["REVIEW_REQUIREMENTS"]
         if not configured.strip():
@@ -226,36 +247,39 @@ def requirements_path(root: Path, args: argparse.Namespace, receipt: Path, numbe
         return configured
     base = getattr(args, "base", None) or os.environ.get("REVIEW_BASE")
     retained = retained_inputs(receipt, numbers, root=root, base=base)
-    if retained is not None and sorted(issue["number"] for issue in retained["issues"]) == sorted(numbers):
+    if retained is not None and sorted(input_issue_numbers(retained)) == sorted(numbers):
         stored = retained
     elif receipt.exists():
-        payload = strict_json(receipt.read_text())
+        payload: object = strict_json(receipt.read_text())
         if not isinstance(payload, dict) or not isinstance(payload.get("inputs"), dict):
             raise ReviewError("stored requirements cannot be recovered from an invalid receipt")
-        read_receipt(receipt, payload["inputs"], root)
-        if sorted(issue["number"] for issue in payload["inputs"]["issues"]) != sorted(numbers):
+        stored = json_object(payload["inputs"], "receipt inputs")
+        read_receipt(receipt, stored, root)
+        if sorted(input_issue_numbers(stored)) != sorted(numbers):
             return None
-        if not retained_context_matches(receipt, payload["inputs"], root, base):
+        if not retained_context_matches(receipt, stored, root, base):
             return None
-        stored = payload["inputs"]
     else:
         return None
-    if sorted(issue["number"] for issue in stored["issues"]) != sorted(numbers):
+    if sorted(input_issue_numbers(stored)) != sorted(numbers):
         return None
     requirements = stored.get("requirements")
     if requirements is None:
         return None
-    if not isinstance(requirements, dict) or not isinstance(requirements.get("path"), str):
+    path_value: object = requirements.get("path") if isinstance(requirements, dict) else None
+    if not isinstance(path_value, str):
         raise ReviewError("stored requirements path is invalid")
-    path = requirements["path"]
-    requirements_context(root, path)
-    return path
+    requirements_context(root, path_value)
+    return path_value
 
 
-def read_receipt(path: Path, inputs: dict, root: Path) -> dict:
-    receipt = strict_json(path.read_text())
+def read_receipt(path: Path, inputs: dict[str, object], root: Path) -> dict[str, object]:
+    receipt = json_object(strict_json(path.read_text()), "receipt")
     result = validate_receipt(receipt, inputs)
-    reviewed_head = receipt["provenance"]["reviewed_head_sha"]
+    provenance = json_object(receipt["provenance"], "receipt provenance")
+    reviewed_head = provenance["reviewed_head_sha"]
+    if not isinstance(reviewed_head, str):
+        raise ReviewError("invalid receipt reviewed HEAD SHA")
     try:
         command(["git", "merge-base", "--is-ancestor", reviewed_head, "HEAD"], root)
     except ReviewError as error:
@@ -276,8 +300,11 @@ def review_command(root: Path, result: Path) -> list[str]:
             "--output-last-message", str(result), "-"]
 
 
-def compact_input(root: Path, inputs: dict) -> dict:
-    base = inputs["source"]["base_sha"]
+def compact_input(root: Path, inputs: dict[str, object]) -> dict[str, object]:
+    source = json_object(inputs["source"], "review source")
+    base = source["base_sha"]
+    if not isinstance(base, str):
+        raise ReviewError("invalid review base SHA")
     changes = {}
     selections = {"head": ["diff", "--no-renames", "--name-only", "-z", base, "HEAD", "--"],
                   "working": ["diff", "--no-renames", "--name-only", "-z", base, "--"],
@@ -303,7 +330,7 @@ def terminate_review_process(process: subprocess.Popen[str]) -> None:
     process.communicate()
 
 
-def run_review_process(arguments: list[str], root: Path, environment: dict, prompt: str, diagnostic: Path) -> int:
+def run_review_process(arguments: list[str], root: Path, environment: dict[str, str], prompt: str, diagnostic: Path) -> int:
     process = None
     process_group_cleaned = False
     cleanup_in_progress = False
@@ -373,7 +400,7 @@ def run_review_process(arguments: list[str], root: Path, environment: dict, prom
                 signal.signal(signum, handler)
 
 
-def invoke_review(root: Path, directory: Path, inputs: dict) -> dict:
+def invoke_review(root: Path, directory: Path, inputs: dict[str, object]) -> dict[str, object]:
     result_path = directory / "result.json"
     environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     environment["KRR_LOCAL_REVIEW_ACTIVE"] = "1"
@@ -400,17 +427,17 @@ def invoke_review(root: Path, directory: Path, inputs: dict) -> dict:
         raise ReviewError(f"Codex review failed (exit {returncode}); inspect {diagnostic}")
     if not result_path.is_file() or result_path.stat().st_size > 1024 * 1024:
         raise ReviewError("Codex did not return a bounded structured review")
-    review = strict_json(result_path.read_text())
+    review: object = strict_json(result_path.read_text())
     retained = directory.parent / "last-review.json"
     atomic_json(retained, review)
     try:
         validate_review(review, inputs)
     except ReviewError as error:
         raise ReviewError(f"{error}; findings retained in {retained}") from error
-    return review
+    return cast("dict[str, object]", review)
 
 
-def atomic_json(path: Path, value: dict) -> None:
+def atomic_json(path: Path, value: object) -> None:
     with tempfile.NamedTemporaryFile(mode="wb", dir=path.parent, delete=False) as output:
         output.write(canonical(value))
         temporary = Path(output.name)
@@ -420,7 +447,7 @@ def atomic_json(path: Path, value: dict) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def obtain_receipt(root: Path, args: argparse.Namespace, path: Path, inputs: dict, numbers: list[int]) -> None:
+def obtain_receipt(root: Path, args: argparse.Namespace, path: Path, inputs: dict[str, object], numbers: list[int]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lock = path.parent / "review.lock"
     with review_lock(lock):

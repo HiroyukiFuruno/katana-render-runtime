@@ -1,4 +1,5 @@
 use super::DrawioJsRuntimeOps;
+use super::page_crop_test_support::create_rect_group_js;
 use crate::markdown::color_preset::DiagramColorPreset;
 
 #[test]
@@ -31,45 +32,32 @@ fn fake_bundle_aligns_positive_page_origin_to_source_vertex_bounds() {
 
 #[test]
 fn fake_bundle_preserves_scaled_page_origin() {
-    let path = temp_runtime_path("kdr-drawio-scaled-page-origin-unit");
     let bundle = fake_bundle_with_shifted_page_origin().replace(
         r#"svg.appendChild(createRectGroup("arrow", 43, 188.44, 120, 62.17));"#,
         r#"svg.appendChild(createRectGroup("frame", 43, 0, 1463, 285));
   svg.appendChild(createRectGroup("arrow", 43, 188.44, 120, 62.17));"#,
     );
-    assert!(std::fs::write(&path, bundle).is_ok());
-
-    let rendered = DrawioJsRuntimeOps::render(
-        scaled_page_origin_source(),
-        &path,
-        DiagramColorPreset::dark(),
-    );
-
-    assert!(
-        rendered
-            .as_ref()
-            .is_ok_and(|svg| svg.contains(r#"width="1520px""#)),
-        "{rendered:?}"
-    );
-    assert!(
-        rendered
-            .as_ref()
-            .is_ok_and(|svg| !svg.contains(r#"transform="translate(-43,0)""#)),
-        "{rendered:?}"
+    assert_page_origin_without_translation(
+        &scaled_page_origin_source(),
+        "kdr-drawio-scaled-page-origin-unit",
+        &bundle,
     );
 }
 
 #[test]
 fn fake_bundle_preserves_non_image_page_origin() {
-    let path = temp_runtime_path("kdr-drawio-non-image-page-origin-unit");
-    assert!(std::fs::write(&path, fake_bundle_with_shifted_page_origin()).is_ok());
-
-    let rendered = DrawioJsRuntimeOps::render(
+    assert_page_origin_without_translation(
         non_image_page_origin_source(),
-        &path,
-        DiagramColorPreset::dark(),
+        "kdr-drawio-non-image-page-origin-unit",
+        fake_bundle_with_shifted_page_origin(),
     );
+}
 
+fn assert_page_origin_without_translation(source: &str, prefix: &str, bundle: &str) {
+    let path = temp_runtime_path(prefix);
+    assert!(std::fs::write(&path, bundle).is_ok());
+
+    let rendered = DrawioJsRuntimeOps::render(source, &path, DiagramColorPreset::dark());
     assert!(
         rendered
             .as_ref()
@@ -122,22 +110,19 @@ fn page_origin_source() -> &'static str {
 </root></mxGraphModel></diagram></mxfile>"#
 }
 
-fn scaled_page_origin_source() -> &'static str {
-    r#"<mxfile type="device"><diagram><mxGraphModel page="1" pageScale="1.5"><root>
-<mxCell id="1" parent="0"/>
+fn scaled_page_origin_source() -> String {
+    page_origin_source()
+        .replace(
+            r#"<mxGraphModel page="1" background="none">"#,
+            r#"<mxGraphModel page="1" pageScale="1.5">"#,
+        )
+        .replace(
+            r#"<mxCell id="1" parent="0"/>"#,
+            r#"<mxCell id="1" parent="0"/>
 <mxCell id="frame" style="html=1;" vertex="1" parent="1">
   <mxGeometry x="160" y="10" width="1463" height="285" as="geometry"/>
-</mxCell>
-<mxCell id="arrow" style="html=1;" vertex="1" parent="1">
-  <mxGeometry x="160" y="198.44" width="120" height="62.17" as="geometry"/>
-</mxCell>
-<mxCell id="image" style="shape=image;html=1;image=data:image/svg+xml,PHN2Zy8+;" vertex="1" parent="1">
-  <mxGeometry x="250" y="170" width="160.03" height="119.05" as="geometry"/>
-</mxCell>
-<mxCell id="label" value="Cells on membrane" style="html=1;fontSize=18;" vertex="1" parent="1">
-  <mxGeometry x="1340" y="170.005" width="282.85" height="110" as="geometry"/>
-</mxCell>
-</root></mxGraphModel></diagram></mxfile>"#
+</mxCell>"#,
+        )
 }
 
 fn non_image_page_origin_source() -> &'static str {
@@ -168,7 +153,8 @@ fn fake_bundle_with_shifted_page_origin() -> &'static str {
     FAKE_BUNDLE_WITH_SHIFTED_PAGE_ORIGIN
 }
 
-const FAKE_BUNDLE_WITH_SHIFTED_PAGE_ORIGIN: &str = r#"
+const FAKE_BUNDLE_WITH_SHIFTED_PAGE_ORIGIN: &str = concat!(
+    r#"
 function Graph() {}
 const Editor = {
   convertHtmlToText(value) {
@@ -192,18 +178,9 @@ GraphViewer.createViewerForElement = function createViewerForElement(_container,
     },
   });
 };
-function createRectGroup(id, x, y, width, height) {
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  group.setAttribute("data-cell-id", id);
-  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  rect.setAttribute("x", String(x));
-  rect.setAttribute("y", String(y));
-  rect.setAttribute("width", String(width));
-  rect.setAttribute("height", String(height));
-  group.appendChild(rect);
-  return group;
-}
-function createLabelGroup() {
+"#,
+    create_rect_group_js!(),
+    r#"function createLabelGroup() {
   const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
   group.setAttribute("data-cell-id", "label");
   group.setAttribute("font-size", "18px");
@@ -214,7 +191,8 @@ function createLabelGroup() {
   group.appendChild(text);
   return group;
 }
-"#;
+"#
+);
 
 fn fake_bundle_with_near_integer_path() -> &'static str {
     r#"

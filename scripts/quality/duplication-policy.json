@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "engine": "jscpd@5.4.1",
+  "minLines": 8,
+  "minTokens": 75,
+  "mode": "mild",
+  "formats": [
+    "rust",
+    "typescript",
+    "javascript",
+    "python"
+  ],
+  "roots": [
+    "crates",
+    "scripts",
+    "tests"
+  ],
+  "excludes": [
+    "generated",
+    "vendor",
+    "target",
+    "node_modules"
+  ],
+  "assetManifest": "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/resources/drawio-resource-manifest.json",
+  "assetResourcesRoot": "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/resources",
+  "assetSourceKinds": [
+    "drawio-shapes",
+    "drawio-webapp"
+  ],
+  "assetBoundaryReason": "Exclude only unchanged Draw.io JavaScript assets explicitly owned by the upstream resource manifest; repository-owned helpers and tests remain in scope.",
+  "exceptions": [
+    {
+      "first": {
+        "path": "crates/katana-render-runtime-cli/src/system/process.rs",
+        "sha256": "02041f56d11c4a59f7644d47a4f2730f385874df19a2675b02d05a556671b8d5",
+        "start": {"line": 2, "column": 25, "position": 46},
+        "end": {"line": 26, "column": 1, "position": 641}
+      },
+      "second": {
+        "path": "crates/katana-render-runtime/src/system/process.rs",
+        "sha256": "bff64126caa2b16101c412a21678cb6297acf12fe6fd3a61c53fd0e2d68bb057",
+        "start": {"line": 1, "column": 39, "position": 39},
+        "end": {"line": 25, "column": 1, "position": 634}
+      },
+      "fragmentSha256": "660aacabf0c54455a27a3a732d5054106c2d82cb153f821c427b253e6af22d75",
+      "reason": "Q15 low-benefit process wrapper clone: exactly 25 lines and 138 tokens across two separately distributed crates. Sharing through the existing runtime dependency would require a new public command-creation API; a new distributed crate would add package, dependency, and release overhead disproportionate to this small wrapper. The current 10 call sites are within the existing two distributed crates (two production consumers plus test subprocesses); test assertion repetition is not exempted. Reassess if a third distributed crate needs this wrapper or an independent public API requirement arises."
+    }
+  ]
+}

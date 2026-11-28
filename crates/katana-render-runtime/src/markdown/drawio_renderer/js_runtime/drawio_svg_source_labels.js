@@ -14,8 +14,9 @@ function katanaDrawioSourceLabelEntries() {
 }
 
 function katanaDrawioSourceMxCellLabelEntries() {
-  return Array.from(katanaDrawioRequestSource().matchAll(/<mxCell\b([^>]*)>/g))
-    .map(katanaDrawioMxCellLabelEntry);
+  return Array.from(katanaDrawioRequestSource().matchAll(/<mxCell\b([^>]*)>/g)).map(
+    katanaDrawioMxCellLabelEntry,
+  );
 }
 
 function katanaDrawioMxCellLabelEntry(match) {
@@ -47,7 +48,9 @@ function katanaDrawioObjectLabelEntry(match) {
 
 function katanaDrawioSourceLabelEntry(attributes, cellAttributes, value) {
   return {
-    id: katanaDrawioCellAttribute(attributes, "id") || katanaDrawioCellAttribute(cellAttributes, "id"),
+    id:
+      katanaDrawioCellAttribute(attributes, "id") ||
+      katanaDrawioCellAttribute(cellAttributes, "id"),
     value,
     label: katanaDrawioHtmlLabelText(value),
     edge: katanaDrawioCellAttribute(cellAttributes, "edge") === "1",
@@ -66,7 +69,8 @@ function katanaDrawioResolvedLabelValue(attributes, cellAttributes, value) {
 function katanaDrawioShouldResolvePlaceholders(attributes, cellAttributes) {
   return [
     katanaDrawioCellAttribute(attributes, "placeholders") === "1",
-    katanaDrawioStyleValue(katanaDrawioCellAttribute(cellAttributes, "style"), "placeholders") === "1",
+    katanaDrawioStyleValue(katanaDrawioCellAttribute(cellAttributes, "style"), "placeholders") ===
+      "1",
   ].some(Boolean);
 }
 
@@ -82,8 +86,9 @@ function katanaDrawioPlaceholderValue(name, attributes, cellAttributes) {
 
 function katanaDrawioParentObjectAttributes(cellAttributes) {
   return (
-    KATANA_DRAWIO_SOURCE_OBJECT_ATTRIBUTES.get(katanaDrawioCellAttribute(cellAttributes, "parent")) ??
-    KATANA_EMPTY_DRAWIO_ATTRIBUTES
+    KATANA_DRAWIO_SOURCE_OBJECT_ATTRIBUTES.get(
+      katanaDrawioCellAttribute(cellAttributes, "parent"),
+    ) ?? KATANA_EMPTY_DRAWIO_ATTRIBUTES
   );
 }
 

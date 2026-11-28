@@ -1,15 +1,36 @@
-use super::file_generation::{FileStamp, stamp_path_uncached};
+use super::file_generation::FileStamp;
 use std::{
     cell::RefCell,
     collections::HashMap,
     path::{Path, PathBuf},
 };
 
+#[cfg(windows)]
+#[path = "svg_rasterize_text_stamp_batch_windows_snapshots.rs"]
+mod windows_snapshots;
+#[cfg(windows)]
+use windows_snapshots::WindowsFontSnapshots;
+#[cfg(windows)]
+#[path = "svg_rasterize_text_stamp_batch_windows_adapter.rs"]
+mod windows_adapter;
+#[cfg(all(test, windows))]
+pub(super) use windows_adapter::windows_font_snapshot_glyph_support_diagnostics;
+#[cfg(windows)]
+pub(super) use windows_adapter::windows_font_snapshot_stamp;
+#[cfg(windows)]
+pub(in super::super) use windows_adapter::{
+    enable_windows_font_snapshots, windows_font_snapshot, windows_font_snapshot_glyph_support,
+};
+#[path = "svg_rasterize_text_stamp_batch_validation.rs"]
+mod validation;
+
 const MAX_BATCH_PATHS: usize = 256;
 
 #[derive(Default)]
 struct StampBatch {
     stamps: HashMap<PathBuf, FileStamp>,
+    #[cfg(windows)]
+    windows_font_snapshots: Option<WindowsFontSnapshots>,
     invalid: bool,
     overflow: bool,
     memo_disabled: bool,
@@ -48,7 +69,7 @@ impl BatchScope {
         }
         let batch = ACTIVE_BATCH.with(|active| active.replace(self.previous.take()));
         self.finished = true;
-        validate_batch(batch)
+        validation::validate_batch(batch)
     }
 }
 
@@ -78,7 +99,7 @@ impl Drop for DisabledBatchScope {
     }
 }
 
-pub(in super::super) fn with_validated_stamp_batch<T>(mut operation: impl FnMut() -> T) -> T {
+pub(in super::super) fn with_render_scoped_stamp_batch<T>(mut operation: impl FnMut() -> T) -> T {
     let scope = BatchScope::enter();
     let result = operation();
     if scope.finish() {
@@ -88,6 +109,18 @@ pub(in super::super) fn with_validated_stamp_batch<T>(mut operation: impl FnMut(
     let result = operation();
     drop(disabled);
     result
+}
+
+pub(in super::super) fn with_reusable_stamp_batch<T>(mut operation: impl FnMut() -> T) -> T {
+    if ACTIVE_BATCH.with(|active| active.borrow().is_some()) {
+        operation()
+    } else {
+        with_render_scoped_stamp_batch(operation)
+    }
+}
+
+pub(in super::super) fn with_validated_stamp_batch<T>(operation: impl FnMut() -> T) -> T {
+    with_render_scoped_stamp_batch(operation)
 }
 
 pub(super) fn cached_stamp(path: &Path) -> Option<FileStamp> {
@@ -141,21 +174,9 @@ pub(in super::super) fn memo_usable() -> bool {
     })
 }
 
-fn validate_batch(batch: Option<StampBatch>) -> bool {
-    let Some(batch) = batch else {
-        return false;
-    };
-    let mut valid =
-        !batch.invalid && !batch.overflow && batch.stamps.values().all(FileStamp::durable_reusable);
-    /* WHY: 一時共有した結果を採用する前に、処理中のファイル変更を検出する。 */
-    for (path, expected) in batch.stamps {
-        if stamp_path_uncached(&path).as_ref() != Ok(&expected) {
-            valid = false;
-        }
-    }
-    valid
-}
-
 #[cfg(test)]
 #[path = "svg_rasterize_text_stamp_batch_tests.rs"]
 mod tests;
+#[cfg(all(test, windows))]
+#[path = "svg_rasterize_text_stamp_batch_windows_snapshot_tests.rs"]
+mod windows_snapshot_tests;

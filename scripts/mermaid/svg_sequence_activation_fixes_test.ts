@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createContext, runInContext } from "node:vm";
 
@@ -12,11 +13,38 @@ const SEQUENCE_FIXES = readFileSync(
 
 type SvgNormalizer = (svg: string) => string;
 
+type SequenceLayout = {
+  markers: string[];
+  replacements: [string, string][];
+};
+
 function normalize(svg: string): string {
   const context = createContext({});
   runInContext(SEQUENCE_FIXES, context);
   return (runInContext("katanaNormalizeSequenceActivationSvg", context) as SvgNormalizer)(svg);
 }
+
+function layouts(): SequenceLayout[] {
+  const context = createContext({});
+  runInContext(SEQUENCE_FIXES, context);
+  return runInContext("KATANA_SEQUENCE_ACTIVATION_LAYOUTS", context) as SequenceLayout[];
+}
+
+function fingerprint(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+test("sequence activation keeps the complete ordered layout table", () => {
+  const table = layouts();
+
+  expect(table).toHaveLength(8);
+  expect(table.map((layout) => layout.replacements.length)).toEqual([
+    14, 36, 38, 14, 36, 38, 22, 20,
+  ]);
+  expect(fingerprint(table)).toBe(
+    "318aad529c453a17e2bc029ea7989935858f28b5bf7b1468f785192480d56a0d",
+  );
+});
 
 test("review 正規化後の Mermaid 12 simple sequence を公式 geometry へ補正する", () => {
   const normalized = normalize(`

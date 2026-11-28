@@ -1,3 +1,8 @@
+#[rustfmt::skip]
+#[path = "vendor/private-v8/build.rs"]
+mod private_v8_build;
+#[path = "src/system/process.rs"]
+mod system;
 use std::{env, fs, io, io::Read, path::PathBuf};
 
 const ARCHIVE: &[u8] = include_bytes!("src/markdown/generated/zenuml-runtime-assets.bin.br");
@@ -11,6 +16,12 @@ mod archive_index {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=src/markdown/generated/zenuml-runtime-assets.bin.br");
     println!("cargo:rerun-if-changed=src/markdown/generated/zenuml-runtime-assets-index.rs");
+    if PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/svg-engine/upstream")
+        .is_dir()
+    {
+        println!("cargo:rerun-if-changed=../../tests/fixtures/svg-engine/upstream");
+    }
 
     let mut decompressor = brotli_decompressor::Decompressor::new(ARCHIVE, BROTLI_BUFFER_SIZE);
     let mut archive = Vec::new();
@@ -28,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(PathBuf::from)
         .ok_or_else(|| io::Error::other("OUT_DIR is not set"))?;
     fs::write(output_dir.join(OUTPUT_FILENAME), source)?;
-    Ok(())
+    private_v8_build::configure()
 }
 
 fn validate_archive_length(archive: &[u8]) -> io::Result<()> {

@@ -61,12 +61,54 @@ fn mathjax_missing_runtime_path_returns_raw_string() -> Result<(), Box<dyn std::
 }
 
 #[test]
+fn mathjax_empty_or_unreadable_keeps_source() -> Result<(), Box<dyn std::error::Error>> {
+    let unreadable = TempMathJaxRuntime::create([0xff])?;
+    let read_error = "MathJax runtime asset could not be read";
+    let cases = [
+        ("unused.js".into(), " \t", "MathJax source is empty"),
+        (unreadable.path.clone(), "x", read_error),
+    ];
+    for (path, source, diagnostic) in cases {
+        let output = MathJaxRenderer::with_runtime_path(path).render(&input(source, false))?;
+        assert_eq!(output.svg, source);
+        assert!(
+            output
+                .diagnostics
+                .errors
+                .iter()
+                .any(|error| error.contains(diagnostic)),
+            "expected MathJax diagnostic {diagnostic:?}; actual diagnostics: {:?}",
+            output.diagnostics.errors
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn mathjax_uses_explicit_runtime_path() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = TempMathJaxRuntime::create(CUSTOM_MATHJAX_RUNTIME)?;
     let renderer = MathJaxRenderer::with_runtime_path(runtime.path.clone());
     let output = renderer.render(&input("custom runtime", false))?;
 
     assert!(output.svg.contains("data-runtime=\"custom\""));
+    assert!(output.diagnostics.errors.is_empty());
+    Ok(())
+}
+
+#[test]
+fn resolver_forwards_mathjax_request() -> Result<(), Box<dyn std::error::Error>> {
+    let runtime = TempMathJaxRuntime::create(CUSTOM_MATHJAX_RUNTIME)?;
+    let (path, renderer) = RuntimePathResolver::resolve_renderer(
+        RenderKind::MathJax,
+        Some(runtime.path.clone()),
+        None,
+    )?;
+    assert_eq!(path, runtime.path);
+
+    let output = renderer.render(&input_with_theme(RenderThemeMode::Dark))?;
+    assert!(output.svg.contains("data-runtime=\"custom\""));
+    assert!(output.svg.contains("data-display=\"true\""));
+    assert!(output.svg.contains("data-dark-mode=\"true\""));
     assert!(output.diagnostics.errors.is_empty());
     Ok(())
 }
@@ -199,7 +241,7 @@ struct TempMathJaxRuntime {
 }
 
 impl TempMathJaxRuntime {
-    fn create(source: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    fn create(source: impl AsRef<[u8]>) -> Result<Self, Box<dyn std::error::Error>> {
         let id = TEMP_ID.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
             "katana-render-runtime-mathjax-custom-{}-{id}.js",
@@ -220,7 +262,7 @@ const CUSTOM_MATHJAX_RUNTIME: &str = r#"
 function katanaRunMathJaxRuntime(request) {
   return JSON.stringify({
     kind: "svg",
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="8" viewBox="0 0 12 8" data-runtime="custom"><text>${request.source}</text></svg>`
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="8" viewBox="0 0 12 8" data-runtime="custom" data-display="${request.display}" data-dark-mode="${request.darkMode}"><text>${request.source}</text></svg>`
   });
 }
 "#;

@@ -48,7 +48,7 @@ pub(super) fn click_element(session: &mut HtmlInteractiveSession, id: &str) -> T
 
 fn click_target(session: &mut HtmlInteractiveSession, x: f32, y: f32) -> TestResult {
     let x = x + 1.0;
-    let y = y + 1.0 - session.scroll_y;
+    let y = y + 1.0 - session.scroll_geometry.scroll_y;
     dispatch_pointer(session, HtmlBrowserInput::PointerDown { x, y, button: 0 })?;
     dispatch_pointer(session, HtmlBrowserInput::PointerUp { x, y, button: 0 })
 }

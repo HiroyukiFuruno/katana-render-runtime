@@ -1,5 +1,12 @@
 /target
+# crate単体実行で作られるCargo出力も管理外に保持する。
+/crates/*/target/
+# 単発のrustc出力とLLVM計測データはソースではなく生成物。
+/rust_out
+/*.profraw
 tmp
+# 実ブラウザ検証の入力・画像は証跡として保持し、公開ソースへ混入させない。
+/output/playwright/
 .katana-krr-browser-*.html
 **/*.rs.bk
 Cargo.lock.bak
@@ -8,6 +15,10 @@ Cargo.lock.bak
 .vscode/
 *.swp
 node_modules
+
+# moon の生成cacheは設定・検証コードと分離する。
+/.moon/cache/
+/.moon/schemas/
 
 # Python
 __pycache__/

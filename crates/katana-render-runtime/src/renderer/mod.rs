@@ -12,10 +12,12 @@ pub use api::{
     RendererProfile, RuntimeVersion,
 };
 pub use backends::{
-    DrawioRenderer, HTML_BROWSER_MAX_SOURCE_BYTES, HtmlBrowserError, HtmlBrowserFrame,
-    HtmlBrowserInput, HtmlBrowserNavigation, HtmlBrowserNavigationEvent, HtmlBrowserOrigin,
-    HtmlBrowserPixelFormat, HtmlBrowserSession, HtmlBrowserSessionState, HtmlBrowserSource,
-    HtmlBrowserViewport, HtmlRenderInput, HtmlRenderOutput, HtmlRenderer, HtmlRuntime,
-    HtmlRuntimeError, HtmlRuntimeSession, MathJaxRenderer, MermaidRenderer, PlantUmlRenderer,
+    DrawioRenderer, HTML_BROWSER_MAX_SOURCE_BYTES, HtmlArtifactError, HtmlArtifactProvenance,
+    HtmlArtifactStore, HtmlBrowserError, HtmlBrowserFrame, HtmlBrowserInput, HtmlBrowserNavigation,
+    HtmlBrowserNavigationEvent, HtmlBrowserOrigin, HtmlBrowserOverflowPolicy,
+    HtmlBrowserPixelFormat, HtmlBrowserScrollMetrics, HtmlBrowserSession, HtmlBrowserSessionState,
+    HtmlBrowserSource, HtmlBrowserViewport, HtmlFrameArtifact, HtmlRenderInput, HtmlRenderOutput,
+    HtmlRenderer, HtmlRuntime, HtmlRuntimeError, HtmlRuntimeSession, MathJaxRenderer,
+    MermaidRenderer, PlantUmlRenderer,
 };
 pub use runtime_path::RuntimePathResolver;

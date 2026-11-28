@@ -77,16 +77,15 @@ mod tests {
         assert_eq!(diagram_type, MermaidDiagramType::Zenuml);
     }
 
-    #[test]
-    fn keeps_other_mermaid_diagrams_on_existing_path() {
-        let diagram_type = MermaidDiagramType::from_source("\n graph TD; A-->B");
+    #[rstest::rstest]
+    #[case::flowchart("\n graph TD; A-->B")]
+    #[case::empty("")]
+    #[case::unclosed_frontmatter("---\ntitle: unfinished\nzenuml\nA.method()")]
+    fn keeps_other_mermaid_diagrams_on_existing_path(#[case] source: &str) {
+        let diagram_type = MermaidDiagramType::from_source(source);
 
         assert_eq!(diagram_type, MermaidDiagramType::Other);
         assert_eq!(diagram_type.request_value(), "");
-        assert_eq!(
-            MermaidDiagramType::from_source(""),
-            MermaidDiagramType::Other
-        );
     }
 
     #[test]

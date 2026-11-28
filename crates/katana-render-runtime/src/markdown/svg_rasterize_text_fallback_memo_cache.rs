@@ -1,5 +1,6 @@
 pub(super) use super::entries::SelectorKey;
 use super::entries::{self, CachedLookup};
+use resvg::usvg;
 use resvg::usvg::fontdb;
 use std::sync::Arc;
 
@@ -7,6 +8,22 @@ pub(super) enum Lookup {
     Bypass,
     Hit(Option<fontdb::ID>),
     Miss(SelectorKey),
+}
+
+pub(super) fn lookup_styled(
+    database: &Arc<fontdb::Database>,
+    font: &usvg::Font,
+    character: char,
+    excluded_ids: &[fontdb::ID],
+) -> Lookup {
+    if !super::super::font::memo_usable()
+        || entries::selector_key_size(excluded_ids.len()) > entries::MAX_KEY_BYTES
+    {
+        return Lookup::Bypass;
+    }
+    let key = entries::styled_selector_key(font, character, excluded_ids);
+    let bytes = entries::key_bytes(&key);
+    lookup_key(database, key, bytes)
 }
 
 pub(super) fn lookup(

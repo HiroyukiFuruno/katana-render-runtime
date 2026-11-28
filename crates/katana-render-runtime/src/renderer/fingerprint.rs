@@ -6,12 +6,25 @@ use std::hash::{Hash, Hasher};
 pub(super) struct CacheFingerprintOps;
 
 impl CacheFingerprintOps {
+    pub(super) fn with_resource(base: String, digest: Option<&str>) -> String {
+        let Some(digest) = digest else {
+            return base;
+        };
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        base.hash(&mut hasher);
+        digest.hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    }
+
     pub(super) fn render(
         input: &RenderInput,
         runtime_version: &str,
         runtime_checksum: &str,
     ) -> String {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        env!("CARGO_PKG_VERSION").hash(&mut hasher);
+        include_str!("../markdown/diagram_runtime/generated/runtime-bundles.sha256")
+            .hash(&mut hasher);
         input.kind.hash(&mut hasher);
         input.source.hash(&mut hasher);
         Self::rendering_vendor_config(&input.config.vendor_config).hash(&mut hasher);

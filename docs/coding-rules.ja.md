@@ -178,7 +178,7 @@ fn process(&self, path: &Path) -> Result<Output, MyError> {
 
 ### 5.1 禁止型
 
-TypeScript の `any` / `unknown` / `Record<string, unknown>` に相当する以下の使用を禁止する:
+TypeScript の無制限な `any`、`as any`、Lint抑制を禁止する。`unknown` と `Record<string, unknown>` は、外部入力・JSON・compiler AST の境界で実行時検証により値を絞り込んでから内部へ渡す場合に使用できる。内部データには具体型を優先する。以下の Rust 相当型は、外部境界の契約上必要な場合を除き禁止する:
 
 | 禁止 | 理由 | 代替 |
 |------|------|------|
@@ -224,15 +224,19 @@ KRR の runtime path では、CLI の `--runtime` は未指定時に同梱 runti
 ## 6. コメント規約
 
 **コメントは「なぜ（WHY）」のみ。何をしているか（WHAT）はコードで表現する。**
-コメントは **英語** で記載する（English First Policy に従う）。
+ロジック注釈は日本語の `/* WHY: ... */` 形式で記載する。通常の `//` 注釈はAST検査で拒否される。
+
+良い例:
 
 ```rust
-// ✅ Good — WHY のみ、英語
-// comrak disables GFM by default, so we explicitly enable the extension here.
+/* WHY: comrakではGFMが既定で無効なので、必要な拡張を明示する。 */
 opts.extension.table = true;
+```
 
-// ❌ Bad — WHAT をコメントしている（コードを読めばわかる）
-// Enable the table extension
+避ける例（WHATのみ）:
+
+```rust
+/* WHY: table拡張を有効にする。 */
 opts.extension.table = true;
 ```
 

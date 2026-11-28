@@ -10,6 +10,18 @@ use katana_render_runtime::{
 use std::path::PathBuf;
 
 #[test]
+fn svg_public_rasterizer_rejects_malformed_shadow_xml_without_rewriting_source() {
+    use katana_render_runtime::markdown::svg_rasterize::{SvgRasterizeError, SvgRasterizeOps};
+
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect style="filter:drop-shadow(0 1px rgba(0,0,0,.5))"></svg>"#;
+    assert_eq!(SvgRasterizeOps::preprocess_for_rasterizer(svg), svg);
+    assert!(matches!(
+        SvgRasterizeOps::rasterize_svg(svg, 1.0),
+        Err(SvgRasterizeError::ParseFailed(_))
+    ));
+}
+
+#[test]
 fn mermaid_renderer_reports_missing_runtime_without_stub_svg()
 -> Result<(), Box<dyn std::error::Error>> {
     let renderer = MermaidRenderer::with_runtime_path(PathBuf::from(

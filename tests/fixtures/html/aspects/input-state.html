@@ -1,0 +1,48 @@
+<!doctype html><meta charset="utf-8"><title>入力と状態</title>
+<style>body{margin:24px;font-family:system-ui;color:#182230}label,select,button{display:block;margin:8px 0}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #2878c8}.panel{border:1px solid #789;padding:12px}.panel[hidden]{display:none}</style>
+<h1>入力状態</h1>
+<form>
+  <label>名称<input id="name" name="name" placeholder="架空の名称"></label>
+  <label>分類<select id="category"><option>未選択</option><option selected>標準</option></select></label>
+  <button id="save" type="button">保存</button><button id="disabled" type="button" disabled>無効</button>
+</form>
+<div class="tabs" role="tablist" aria-label="表示切替">
+  <button id="tab-summary" role="tab" aria-selected="true" aria-controls="panel-summary">概要</button>
+  <button id="tab-advanced" role="tab" aria-selected="false" aria-controls="panel-advanced">詳細</button>
+</div>
+<section id="panel-summary" role="tabpanel">概要の架空情報。</section>
+<section id="panel-advanced" role="tabpanel" hidden>詳細の架空情報。</section>
+<button id="accordion" type="button" aria-expanded="false" aria-controls="accordion-panel">補足を開く</button>
+<div id="accordion-panel" class="panel" hidden>展開時に表示される架空情報。</div>
+<details class="panel"><summary>ネイティブ補足</summary><p>ネイティブ詳細。</p></details>
+<output id="state-summary">{"name":"","category":"標準","tab":"summary","expanded":false,"disabled":true,"focusVisible":false,"keyboard":false}</output>
+<script>
+  const name = document.querySelector('#name');
+  const category = document.querySelector('#category');
+  const summary = document.querySelector('#state-summary');
+  const tabs = document.querySelectorAll('[role="tab"]');
+  const accordion = document.querySelector('#accordion');
+  const accordionPanel = document.querySelector('#accordion-panel');
+  function writeState() {
+    summary.textContent = JSON.stringify({
+      name: name.value || '', category: category.querySelector('option[selected]')?.textContent || '',
+      tab: document.querySelector('[role="tab"][aria-selected="true"]')?.id.replace('tab-', '') || '',
+      expanded: accordion.getAttribute('aria-expanded') === 'true', disabled: document.querySelector('#disabled').getAttribute('disabled') !== null,
+      focusVisible: summary.dataset.keyboard === 'true',
+      keyboard: summary.dataset.keyboard === 'true'
+    });
+  }
+  name.addEventListener('input', writeState);
+  category.addEventListener('change', writeState);
+  tabs.forEach((tab) => tab.addEventListener('click', () => {
+    tabs.forEach((item) => item.setAttribute('aria-selected', item === tab ? 'true' : 'false'));
+    document.querySelectorAll('[role="tabpanel"]').forEach((panel) => { panel.hidden = panel.id !== tab.getAttribute('aria-controls'); });
+    writeState();
+  }));
+  accordion.addEventListener('click', () => {
+    const expanded = accordion.getAttribute('aria-expanded') !== 'true';
+    accordion.setAttribute('aria-expanded', String(expanded)); accordionPanel.hidden = !expanded; writeState();
+  });
+  document.addEventListener('keydown', (event) => { if (event.key === 'Tab') { summary.dataset.keyboard = 'true'; writeState(); } });
+  writeState();
+</script>

@@ -1,26 +1,89 @@
 use resvg::usvg;
 use std::{collections::BTreeSet, path::PathBuf};
 
+#[path = "svg_rasterize_html_font_platform.rs"]
+pub(in crate::markdown::svg_rasterize) mod platform;
+use platform::{PlatformFontStrategy, font_platform};
+#[cfg(any(test, target_os = "macos", target_os = "ios"))]
+#[path = "svg_rasterize_html_font_native_paths.rs"]
+mod native_paths;
+#[cfg(test)]
+use native_paths::named_font_paths;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+use native_paths::native_system_font_paths;
+#[cfg(windows)]
+#[path = "svg_rasterize_html_font_windows_paths.rs"]
+mod windows_paths;
+#[cfg(windows)]
+use windows_paths::windows_system_font_paths as native_system_font_paths;
+
 /* WHY: 任意のHTMLが大量のfamilyを指定しても、同期したfontconfig探索は描画ごとに1回・有限件にする。 */
 const MAX_SYSTEM_FONT_FAMILIES_PER_REQUEST: usize = 16;
 
+pub(super) fn installed_family_requests(
+    families: &[String],
+    needs_cjk: bool,
+) -> impl Iterator<Item = &str> {
+    let installed_families = families
+        .iter()
+        .map(String::as_str)
+        .filter(|family| !super::sources::is_generic_font_family(family))
+        .flat_map(|family| {
+            [
+                Some(family),
+                font_platform().compatible_named_family(family),
+            ]
+        })
+        .flatten();
+    let system_ui = families
+        .iter()
+        .any(|family| family == "system-ui")
+        .then(|| font_platform().installed_system_ui_family())
+        .flatten();
+    let cjk_fallback = needs_cjk
+        .then(|| font_platform().cjk_fallback_family())
+        .flatten();
+    installed_families.chain(system_ui).chain(cjk_fallback)
+}
+
+#[cfg(test)]
 pub(super) fn load_requested_system_font_families<'a>(
     database: &mut usvg::fontdb::Database,
     families: impl IntoIterator<Item = &'a str>,
+) {
+    let mut loaded_paths = BTreeSet::new();
+    load_requested_system_font_families_once(database, families, &mut loaded_paths);
+}
+
+pub(super) fn load_requested_system_font_families_once<'a>(
+    database: &mut usvg::fontdb::Database,
+    families: impl IntoIterator<Item = &'a str>,
+    loaded_paths: &mut BTreeSet<PathBuf>,
 ) {
     let families = requested_system_font_families(families);
     if families.is_empty() {
         return;
     }
-    load_system_font_paths(database, requested_system_font_paths(&families));
+    load_system_font_paths(
+        database,
+        requested_system_font_paths(&families),
+        loaded_paths,
+    );
 }
 
 fn load_system_font_paths(
     database: &mut usvg::fontdb::Database,
     paths: impl IntoIterator<Item = PathBuf>,
+    loaded_paths: &mut BTreeSet<PathBuf>,
 ) {
     for path in paths {
-        database.load_font_source(usvg::fontdb::Source::File(path));
+        let should_load = match super::sources::canonical_font_source_path(&path) {
+            Ok(identity) => loaded_paths.insert(identity),
+            Err(_) => true,
+        };
+        if should_load {
+            database.load_font_source(usvg::fontdb::Source::File(path));
+        }
     }
 }
 
@@ -40,60 +103,11 @@ fn requested_system_font_families<'a>(
 }
 
 fn requested_system_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
-    existing_system_font_paths(platform_font_paths(families))
+    existing_system_font_paths(font_platform().installed_paths(families))
 }
 
 fn existing_system_font_paths(paths: impl IntoIterator<Item = PathBuf>) -> BTreeSet<PathBuf> {
     paths.into_iter().filter(|path| path.is_file()).collect()
-}
-
-#[cfg(any(target_os = "windows", target_os = "macos", target_os = "ios"))]
-fn platform_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
-    let native_paths = native_system_font_paths(families);
-    if !native_paths.is_empty() {
-        return native_paths;
-    }
-    fontconfig_font_paths(families)
-}
-
-#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "ios")))]
-fn platform_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
-    fontconfig_font_paths(families)
-}
-
-#[cfg(any(target_os = "windows", target_os = "macos", target_os = "ios"))]
-fn native_system_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
-    /* WHY: 一時DBはinstalled face metadataだけを走査し、選択したFile sourceだけを呼出元DBへ残す。 */
-    let mut database = usvg::fontdb::Database::new();
-    database.load_system_fonts();
-    named_font_paths(&database, families)
-}
-
-#[cfg(any(test, target_os = "windows", target_os = "macos", target_os = "ios"))]
-fn named_font_paths(
-    database: &usvg::fontdb::Database,
-    requested_families: &BTreeSet<&str>,
-) -> BTreeSet<PathBuf> {
-    database
-        .faces()
-        .filter(|face| face_has_requested_family(face, requested_families))
-        .filter_map(|face| match &face.source {
-            usvg::fontdb::Source::File(path) => Some(path.clone()),
-            _ => None,
-        })
-        .collect()
-}
-
-#[cfg(any(test, target_os = "windows", target_os = "macos", target_os = "ios"))]
-fn face_has_requested_family(
-    face: &usvg::fontdb::FaceInfo,
-    requested_families: &BTreeSet<&str>,
-) -> bool {
-    face.families.iter().any(|(family, _)| {
-        requested_families
-            .iter()
-            .any(|requested| family.eq_ignore_ascii_case(requested))
-    })
 }
 
 fn fontconfig_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
@@ -154,6 +168,7 @@ mod tests {
     };
     use resvg::usvg;
     use std::{
+        collections::BTreeSet,
         path::PathBuf,
         process::{ExitStatus, Output},
     };
@@ -228,14 +243,33 @@ mod tests {
     }
 
     #[test]
-    fn system_font_path_loader_registers_a_known_bundled_font() {
-        let font =
+    fn system_font_path_loader_recovers_when_a_discovered_file_appears()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let bundled =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/NotoSans-Regular.ttf");
+        let directory = tempfile::tempdir()?;
+        let font = directory.path().join("NotoSans-Regular.ttf");
         let mut database = usvg::fontdb::Database::new();
+        let mut loaded_paths = BTreeSet::new();
 
-        load_system_font_paths(&mut database, [font]);
+        load_system_font_paths(
+            &mut database,
+            BTreeSet::from([font.clone()]),
+            &mut loaded_paths,
+        );
+        assert_eq!(database.faces().count(), 0);
+        assert!(loaded_paths.is_empty());
 
-        assert!(database.faces().next().is_some());
+        std::fs::copy(bundled, &font)?;
+        load_system_font_paths(
+            &mut database,
+            BTreeSet::from([font.clone()]),
+            &mut loaded_paths,
+        );
+        load_system_font_paths(&mut database, BTreeSet::from([font]), &mut loaded_paths);
+        assert_eq!(database.faces().count(), 1);
+        assert_eq!(loaded_paths.len(), 1);
+        Ok(())
     }
 
     #[test]
@@ -289,9 +323,11 @@ mod tests {
             .collect::<Vec<_>>();
         families.push("krr-font-0".to_string());
 
-        let requested = requested_system_font_families(families.iter().map(String::as_str));
+        let request = std::iter::once("").chain(families.iter().map(String::as_str));
+        let requested = requested_system_font_families(request);
 
         assert_eq!(requested.len(), MAX_SYSTEM_FONT_FAMILIES_PER_REQUEST);
+        assert!(!requested.contains(""));
         assert!(requested.contains("krr-font-0"));
         assert!(
             !requested
@@ -306,5 +342,12 @@ mod tests {
         load_requested_system_font_families(&mut database, ["krr-family-that-cannot-exist-7f0b"]);
 
         assert!(database.faces().next().is_none());
+    }
+
+    #[test]
+    fn empty_requested_families_leave_database_unchanged() {
+        let mut database = usvg::fontdb::Database::new();
+        load_requested_system_font_families(&mut database, ["", ""]);
+        assert_eq!(database.faces().count(), 0);
     }
 }

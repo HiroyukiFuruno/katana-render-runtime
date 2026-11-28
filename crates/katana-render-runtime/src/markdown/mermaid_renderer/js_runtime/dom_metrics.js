@@ -82,10 +82,10 @@ function katanaWrappedHtmlLineCount(node, width) {
   if (words.length === 0) {
     return 0;
   }
-  return words.reduce(
-    (state, word) => katanaAppendWrappedHtmlWord(state, node, word, width),
-    { lines: 1, width: 0 },
-  ).lines;
+  return words.reduce((state, word) => katanaAppendWrappedHtmlWord(state, node, word, width), {
+    lines: 1,
+    width: 0,
+  }).lines;
 }
 
 function katanaAppendWrappedHtmlWord(state, node, word, limit) {
@@ -129,16 +129,14 @@ function katanaGraphViewerClientBox(context) {
     ? availableWidth
     : Math.min(context.explicitWidth ?? context.box.width, availableWidth);
   const height = context.explicitHeight ?? context.box.height;
-  return katanaBox(
-    context.box.x,
-    context.box.y,
-    width,
-    height,
-  );
+  return katanaBox(context.box.x, context.box.y, width, height);
 }
 
 function katanaGraphViewerUsesAvailableWidth(node) {
-  return String(node.style?.getPropertyValue?.("min-width") ?? node.style?.minWidth ?? "").trim() === "100%";
+  return (
+    String(node.style?.getPropertyValue?.("min-width") ?? node.style?.minWidth ?? "").trim() ===
+    "100%"
+  );
 }
 
 function katanaClientBoxContext(node) {

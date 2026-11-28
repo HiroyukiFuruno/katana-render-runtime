@@ -1,0 +1,357 @@
+import json
+import unittest
+from pathlib import Path
+
+import html_performance_memory_evidence as evidence
+import html_performance_memory_policy as policy
+import verify_html_performance_evidence as gate
+import verify_html_performance_evidence_test as fixture_module
+
+
+class MemoryEvidenceTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fixture = fixture_module.PerformanceEvidenceTest("runTest")
+        self.addCleanup(self.fixture.doCleanups)
+        self.fixture.setUp()
+        self.paths = self.fixture.report_paths[0]
+        self.expected = gate.read_json(self.fixture.expected_paths[0])
+        self.retained = [100.0] * 25
+
+    def test_paired_recomputes_v1_without_changing_raw_reports(self) -> None:
+        before = {path: path.read_bytes() for path in self.paths}
+        result = evidence.evaluate_paired(self.paths, self.expected, self.retained)
+        self.assertEqual(result["v1Policy"], gate.evaluate_measurement_policy(self.paths, self.expected))
+        self.assertEqual(result["policyPass"], True)
+        self.assertEqual(result["formalAccepted"], False)
+        self.assertEqual(set(gate._object(result["phases"], "phases")), set(gate.PHASES))
+        self.assertEqual(before, {path: path.read_bytes() for path in self.paths})
+
+    def test_incremental_policy_accepts_lower_candidate_memory(self) -> None:
+        for path in self.paths:
+            report = gate.read_json(path)
+            for sample in gate._objects(report["samples"], "samples"):
+                for phase in gate.PHASES:
+                    entry = gate._object(gate._object(sample["phases"], "phases")[phase], "phase")
+                    measured = gate._object(entry["measurement"], "measurement") if phase in (
+                        "post_operation", "same_session_resize",
+                    ) else entry
+                    measured["peak_rss_bytes"] = (99 if path.name.startswith("candidate-") else 100) * policy.MIB
+            path.write_text(json.dumps(report))
+        result = evidence.evaluate_paired(
+            self.paths, self.expected, self.retained,
+            policy_version=policy.INCREMENTAL_RSS_POLICY_VERSION,
+        )
+        self.assertTrue(result["policyPass"])
+
+    def test_explicit_v2_and_v3_keep_v1_and_apply_own_retention_budget(self) -> None:
+        retained = [40 * policy.MIB] * 15 + [44 * policy.MIB] * 10
+        legacy = evidence.evaluate_paired(self.paths, self.expected, retained,
+                                          policy_version=policy.LEGACY_POLICY_VERSION)
+        current = evidence.evaluate_paired(self.paths, self.expected, retained,
+                                           policy_version=policy.PREVIOUS_POLICY_VERSION)
+        latest = evidence.evaluate_paired(self.paths, self.expected, retained)
+        self.assertEqual(legacy["version"], policy.LEGACY_POLICY_VERSION)
+        self.assertEqual(current["version"], policy.PREVIOUS_POLICY_VERSION)
+        self.assertEqual(latest["version"], policy.POLICY_VERSION)
+        self.assertEqual(legacy["v1Policy"], current["v1Policy"])
+        self.assertEqual(current["v1Policy"], latest["v1Policy"])
+        self.assertFalse(legacy["policyPass"])
+        self.assertTrue(current["policyPass"])
+        self.assertTrue(latest["policyPass"])
+        with self.assertRaisesRegex(ValueError, "unsupported memory policy version"):
+            evidence.evaluate_paired(self.paths, self.expected, retained, policy_version="unknown")
+
+    def test_paired_rejects_missing_or_unexecuted_reports(self) -> None:
+        with self.assertRaises(ValueError):
+            evidence.evaluate_paired(self.paths[:-1], self.expected, self.retained)
+        candidate = next(path for path in self.paths if path.name == "candidate-0.json")
+        report = gate.read_json(candidate)
+        report["measurement_executed"] = False
+        candidate.write_text(json.dumps(report))
+        with self.assertRaisesRegex(ValueError, "actual measurements absent"):
+            evidence.evaluate_paired(self.paths, self.expected, self.retained)
+
+    def test_no_scroll_bookkeeping_is_not_render_time(self) -> None:
+        self.set_full_y_comparison()
+        saved = {path: path.read_bytes() for path in self.paths}
+        legacy = evidence.evaluate_paired(self.paths, self.expected, self.retained)
+        corrected = evidence.evaluate_paired(
+            self.paths, self.expected, self.retained, policy_version=policy.ZERO_SCROLL_POLICY_VERSION,
+        )
+        self.assertFalse(legacy["policyPass"])
+        self.assertTrue(corrected["policyPass"])
+        self.assertEqual(legacy["aggregate"], corrected["aggregate"])
+        self.assertEqual(legacy["v1Policy"], corrected["v1Policy"])
+        self.assertEqual(saved, {path: path.read_bytes() for path in self.paths})
+
+    def test_no_scroll_policy_still_rejects_actual_scroll_regression(self) -> None:
+        self.set_full_y_comparison()
+        self.set_actual_full_y_scroll()
+        result = evidence.evaluate_paired(
+            self.paths, self.expected, self.retained, policy_version=policy.ZERO_SCROLL_POLICY_VERSION,
+        )
+        self.assertFalse(result["policyPass"])
+
+    def test_no_scroll_policy_still_rejects_retained_memory_growth(self) -> None:
+        self.set_full_y_comparison()
+        retained = [40 * policy.MIB] * 15 + [52 * policy.MIB] * 10
+        result = evidence.evaluate_paired(
+            self.paths, self.expected, retained, policy_version=policy.ZERO_SCROLL_POLICY_VERSION,
+        )
+        self.assertFalse(result["policyPass"])
+
+    def test_cumulative_rss_policy_inherits_only_noop_full_y_peak_judgment(self) -> None:
+        self.set_full_y_comparison()
+        self.match_full_y_rss_to_re_display()
+        result = evidence.evaluate_paired(
+            self.paths, self.expected, self.retained,
+            policy_version=policy.CUMULATIVE_RSS_POLICY_VERSION,
+        )
+        phases = gate._object(result["phases"], "phases")
+        re_display = gate._object(phases["re_display"], "re-display result")
+        full_y = gate._object(phases["full_y"], "full-Y result")
+        self.assertTrue(result["policyPass"])
+        self.assertEqual(full_y["category"], "inherited-re-display")
+        self.assertEqual(full_y["inheritedCategory"], re_display["category"])
+        self.assertEqual(full_y["peak_allowed"], re_display["peak_allowed"])
+        self.assertEqual(gate._object(full_y["time_regression"], "full-Y timing")["test_performed"], False)
+
+    def test_cumulative_rss_policy_rejects_nonidentical_full_y_rss(self) -> None:
+        self.set_full_y_comparison()
+        self.match_full_y_rss_to_re_display()
+        path = next(path for path in self.paths if path.name == "candidate-0.json")
+        report = gate.read_json(path)
+        sample = gate._objects(report["samples"], "samples")[0]
+        full_y = gate._object(gate._object(sample["phases"], "phases")["full_y"], "full-Y phase")
+        full_y["peak_rss_bytes"] = (
+            gate._integer(full_y["peak_rss_bytes"], "full-Y peak RSS") + 100 * policy.MIB
+        )
+        path.write_text(json.dumps(report))
+        result = evidence.evaluate_paired(
+            self.paths, self.expected, self.retained,
+            policy_version=policy.CUMULATIVE_RSS_POLICY_VERSION,
+        )
+        self.assertFalse(result["policyPass"])
+        phase = gate._object(gate._object(result["phases"], "phases")["full_y"], "full-Y result")
+        self.assertNotEqual(phase["category"], "inherited-re-display")
+
+    def test_cumulative_rss_policy_does_not_mask_re_display_regression(self) -> None:
+        self.set_full_y_comparison()
+        self.match_full_y_rss_to_re_display()
+        for path in (path for path in self.paths if path.name.startswith("candidate-")):
+            report = gate.read_json(path)
+            for sample in gate._objects(report["samples"], "samples"):
+                phases = gate._object(sample["phases"], "phases")
+                re_display = gate._object(phases["re_display"], "re-display phase")
+                re_display["peak_rss_bytes"] = (
+                    gate._integer(re_display["peak_rss_bytes"], "re-display peak RSS")
+                    + 100 * policy.MIB
+                )
+                gate._object(phases["full_y"], "full-Y phase")["peak_rss_bytes"] = (
+                    re_display["peak_rss_bytes"]
+                )
+            path.write_text(json.dumps(report))
+        result = evidence.evaluate_paired(
+            self.paths, self.expected, self.retained,
+            policy_version=policy.CUMULATIVE_RSS_POLICY_VERSION,
+        )
+        phases = gate._object(result["phases"], "phases")
+        re_display = gate._object(phases["re_display"], "re-display result")
+        full_y = gate._object(phases["full_y"], "full-Y result")
+        self.assertFalse(result["policyPass"])
+        self.assertEqual(full_y["category"], "inherited-re-display")
+        self.assertEqual(full_y["peak_allowed"], re_display["peak_allowed"])
+
+    def test_cumulative_rss_policy_uses_direct_judgment_for_actual_scroll(self) -> None:
+        self.set_full_y_comparison()
+        self.match_candidate_full_y_to_baseline()
+        self.set_actual_full_y_scroll()
+        result = evidence.evaluate_paired(
+            self.paths, self.expected, self.retained,
+            policy_version=policy.CUMULATIVE_RSS_POLICY_VERSION,
+        )
+        self.assertTrue(result["policyPass"])
+        phase = gate._object(gate._object(result["phases"], "phases")["full_y"], "full-Y result")
+        self.assertNotEqual(phase["category"], "inherited-re-display")
+
+    def test_incremental_policy_distinguishes_inherited_and_new_peak(self) -> None:
+        for path in self.paths:
+            report = gate.read_json(path)
+            candidate = path.name.startswith("candidate-")
+            for sample in gate._objects(report["samples"], "samples"):
+                phases = gate._object(sample["phases"], "phases")
+                for phase in gate.PHASES:
+                    entry = gate._object(phases[phase], "phase")
+                    measured = gate._object(entry["measurement"], "measurement") if phase in (
+                        "post_operation", "same_session_resize",
+                    ) else entry
+                    measured["peak_rss_bytes"] = 100 * policy.MIB
+                    if candidate:
+                        measured["peak_rss_bytes"] = gate._integer(measured["peak_rss_bytes"], "peak") + 2 * policy.MIB
+                        if phase == "cold_open":
+                            measured["elapsed_ms"] = 1
+                        elif phase in ("warm_open", "re_display", "full_y", "post_operation", "same_session_resize"):
+                            measured["peak_rss_bytes"] = gate._integer(measured["peak_rss_bytes"], "peak") + 2 * policy.MIB
+                    elif phase == "cold_open":
+                        measured["elapsed_ms"] = 10
+            path.write_text(json.dumps(report))
+        result = evidence.evaluate_paired(
+            self.paths, self.expected, self.retained,
+            policy_version=policy.INCREMENTAL_RSS_POLICY_VERSION,
+        )
+        phases = gate._object(result["phases"], "phases")
+        self.assertTrue(gate._object(phases["cold_open"], "cold")["peak_allowed"])
+        self.assertFalse(gate._object(phases["warm_open"], "warm")["peak_allowed"])
+        for path in (path for path in self.paths if path.name.startswith("candidate-")):
+            report = gate.read_json(path)
+            for sample in gate._objects(report["samples"], "samples"):
+                phases = gate._object(sample["phases"], "phases")
+                for phase in ("warm_open", "re_display", "full_y", "post_operation", "same_session_resize"):
+                    entry = gate._object(phases[phase], "phase")
+                    measured = gate._object(entry["measurement"], "measurement") if phase in (
+                        "post_operation", "same_session_resize",
+                    ) else entry
+                    measured["peak_rss_bytes"] = 102 * policy.MIB
+            path.write_text(json.dumps(report))
+        result = evidence.evaluate_paired(
+            self.paths, self.expected, self.retained,
+            policy_version=policy.INCREMENTAL_RSS_POLICY_VERSION,
+        )
+        warm = gate._object(gate._object(result["phases"], "phases")["warm_open"], "warm")
+        self.assertTrue(warm["peak_allowed"])
+        self.assertEqual(warm["category"], "bounded-inherited-cold")
+        path = next(path for path in self.paths if path.name.startswith("candidate-"))
+        report = gate.read_json(path)
+        sample = gate._objects(report["samples"], "samples")[0]
+        warm = gate._object(gate._object(sample["phases"], "phases")["warm_open"], "warm")
+        warm["peak_rss_bytes"] = 101 * policy.MIB
+        path.write_text(json.dumps(report))
+        with self.assertRaisesRegex(ValueError, "cumulative peak RSS decreases"):
+            evidence.evaluate_paired(
+                self.paths, self.expected, self.retained,
+                policy_version=policy.INCREMENTAL_RSS_POLICY_VERSION,
+            )
+
+    def set_actual_full_y_scroll(self) -> None:
+        path = next(path for path in self.paths if path.name == "candidate-0.json")
+        report = gate.read_json(path)
+        sample = gate._objects(report["samples"], "samples")[0]
+        full_y = gate._object(gate._object(sample["phases"], "phases")["full_y"], "full-Y phase")
+        full_y.update(scroll_steps=1, max_scroll=1, final_scroll_y=1, max_frame_elapsed_ms=0.000583)
+        gate._object(full_y["frame"], "full-Y frame")["scroll_y"] = 1
+        path.write_text(json.dumps(report))
+
+    def match_candidate_full_y_to_baseline(self) -> None:
+        for path in (path for path in self.paths if path.name.startswith("candidate-")):
+            report = gate.read_json(path)
+            baseline = gate.read_json(path.with_name(path.name.replace("candidate", "baseline")))
+            for sample, baseline_sample in zip(
+                gate._objects(report["samples"], "candidate samples"),
+                gate._objects(baseline["samples"], "baseline samples"),
+                strict=True,
+            ):
+                full_y = gate._object(gate._object(sample["phases"], "phases")["full_y"], "full-Y phase")
+                baseline_full_y = gate._object(
+                    gate._object(baseline_sample["phases"], "phases")["full_y"], "baseline full-Y phase",
+                )
+                full_y["elapsed_ms"] = baseline_full_y["elapsed_ms"]
+                full_y["peak_rss_bytes"] = baseline_full_y["peak_rss_bytes"]
+            path.write_text(json.dumps(report))
+
+    def match_full_y_rss_to_re_display(self) -> None:
+        for path in self.paths:
+            report = gate.read_json(path)
+            for sample in gate._objects(report["samples"], "samples"):
+                phases = gate._object(sample["phases"], "phases")
+                full_y = gate._object(phases["full_y"], "full-Y phase")
+                re_display = gate._object(phases["re_display"], "re-display phase")
+                full_y["peak_rss_bytes"] = re_display["peak_rss_bytes"]
+            path.write_text(json.dumps(report))
+
+    def set_full_y_comparison(self) -> None:
+        _, expected, _, _, _ = self.fixture._noncomparable_baseline_fixture("memory")
+        self.add_catalog_identity(self.paths, expected)
+        for path in self.paths:
+            report = gate.read_json(path)
+            candidate = path.name.startswith("candidate-")
+            for sample in gate._objects(report["samples"], "samples"):
+                phases = gate._object(sample["phases"], "phases")
+                full_y = gate._object(phases["full_y"], "full-Y phase")
+                full_y.update(actual_bottom=True, scroll_steps=0, max_scroll=0,
+                              final_scroll_y=0, max_frame_elapsed_ms=0)
+                full_y["elapsed_ms"] = 0.000583 if candidate else 0.000500
+                frame = gate._object(full_y["frame"], "full-Y frame")
+                viewport = gate._object(sample["viewport"], "viewport")
+                frame.update(scroll_y=0, content_height=viewport["height"], viewport=viewport)
+            path.write_text(json.dumps(report))
+
+    def test_v1_rss_failure_can_have_separate_v2_small_peak_result(self) -> None:
+        for path in self.paths:
+            if path.name.startswith("candidate-"):
+                report = gate.read_json(path)
+                for sample in gate._objects(report["samples"], "samples"):
+                    phases = gate._object(sample["phases"], "phases")
+                    gate._object(phases["cold_open"], "cold")['peak_rss_bytes'] = 101
+                path.write_text(json.dumps(report))
+        result = evidence.evaluate_paired(self.paths, self.expected, self.retained)
+        self.assertFalse(gate._object(result["v1Policy"], "v1")["policyPass"])
+        self.assertTrue(result["policyPass"])
+        self.assertFalse(result["formalAccepted"])
+
+    def add_catalog_identity(self, paths: list[Path], catalog_expected: gate.JsonObject) -> None:
+        identity = gate._object(catalog_expected["catalogCondition"], "catalog")
+        reference = gate._object(catalog_expected["operationEvidenceRef"], "operation evidence")
+        self.expected.update(catalogCondition=identity, operationEvidenceRef=reference)
+        for path in paths:
+            report = gate.read_json(path)
+            report.update(
+                condition_id=identity["condition_id"], case_id=identity["case_id"],
+                state=identity["state"], operation_kind=identity["operation_kind"],
+                operation_evidence_ref=reference, catalog_condition=identity,
+            )
+            for sample in gate._objects(report["samples"], "samples"):
+                sample["catalog_condition"] = {
+                    "profile": "catalog-plan84", "condition_id": identity["condition_id"],
+                    "case_id": identity["case_id"], "state": identity["state"],
+                    "operation_kind": identity["operation_kind"],
+                    "operation_evidence_sha256": reference["sha256"],
+                }
+            path.write_text(json.dumps(report))
+
+    def candidate_fixture(self) -> list[Path]:
+        _, self.expected, _, _, _ = self.fixture._noncomparable_baseline_fixture("memory")
+        candidates = [path for path in self.paths if path.name.startswith("candidate-")]
+        self.add_catalog_identity(candidates, self.expected)
+        return candidates
+
+    def test_candidate_only_never_accepts_an_absent_baseline(self) -> None:
+        candidates = self.candidate_fixture()
+        result = evidence.evaluate_candidate_only(candidates, self.expected, self.retained)
+        self.assertTrue(result["candidateRetentionPass"])
+        self.assertFalse(result["policyPass"])
+        self.assertFalse(result["formalAccepted"])
+        self.assertEqual(result["candidateSamples"], 25)
+        legacy = evidence.evaluate_candidate_only(candidates, self.expected, self.retained,
+                                                   policy_version=policy.LEGACY_POLICY_VERSION)
+        self.assertEqual(legacy["version"], policy.LEGACY_POLICY_VERSION)
+        self.assertFalse(legacy["formalAccepted"])
+        with self.assertRaisesRegex(ValueError, "unsupported memory policy version"):
+            evidence.evaluate_candidate_only(candidates, self.expected, self.retained,
+                                             policy_version="unknown")
+        with self.assertRaises(ValueError):
+            evidence.evaluate_candidate_only(candidates[:-1], self.expected, self.retained)
+        with self.assertRaises(ValueError):
+            evidence.evaluate_candidate_only(candidates[:4] + candidates[:1], self.expected, self.retained)
+
+    def test_candidate_only_checks_known_condition_and_real_report_metadata(self) -> None:
+        candidates = self.candidate_fixture()
+        catalog = gate._object(self.expected["catalogCondition"], "catalog")
+        catalog["condition_id"] = "unknown"
+        with self.assertRaises(ValueError):
+            evidence.evaluate_candidate_only(candidates, self.expected, self.retained)
+        catalog["condition_id"] = "navigation/top/1280x900@1"
+        report = gate.read_json(candidates[0])
+        report["measurement_executed"] = False
+        candidates[0].write_text(json.dumps(report))
+        with self.assertRaises(ValueError):
+            evidence.evaluate_candidate_only(candidates, self.expected, self.retained)

@@ -1,4 +1,5 @@
 use super::DrawioJsRuntimeOps;
+use super::test_support::fake_color_bundle;
 use crate::markdown::color_preset::DiagramColorPreset;
 
 #[test]
@@ -126,28 +127,17 @@ fn temp_runtime_path(prefix: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("{prefix}-{}.js", std::process::id()))
 }
 
-fn fake_bundle() -> &'static str {
-    FAKE_BUNDLE
+fn fake_bundle() -> String {
+    fake_color_bundle(FAKE_BUNDLE_MX_UTILS, FAKE_BUNDLE_SVG_BODY)
 }
 
-const FAKE_BUNDLE: &str = r#"
-function Graph() {}
-var mxUtils = {
+const FAKE_BUNDLE_MX_UTILS: &str = r###"var mxUtils = {
   lightDarkColorSupported: false,
   preferDarkColor: true,
 };
-const Editor = {
-  convertHtmlToText(value) {
-    return String(value);
-  },
-};
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "80");
-  svg.setAttribute("height", "30");
-  svg.setAttribute("viewBox", "0 0 80 30");
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+"###;
+
+const FAKE_BUNDLE_SVG_BODY: &str = r###"  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
   group.setAttribute("data-cell-id", "cell");
   const shape = document.createElementNS("http://www.w3.org/2000/svg", "g");
   shape.setAttribute("transform", "translate(0.5,0.5)");
@@ -164,23 +154,13 @@ GraphViewer.createViewerForElement = function createViewerForElement(_container,
   group.appendChild(shape);
   group.appendChild(textGroup);
   svg.appendChild(group);
-  callback({
-    graph: {
-      getSvg() {
-        return svg;
-      },
-    },
-  });
-};
-"#;
+"###;
 
-fn fake_source_text_bundle() -> &'static str {
-    FAKE_SOURCE_TEXT_BUNDLE
+fn fake_source_text_bundle() -> String {
+    fake_color_bundle(FAKE_SOURCE_TEXT_MX_UTILS, FAKE_SOURCE_TEXT_SVG_BODY)
 }
 
-const FAKE_SOURCE_TEXT_BUNDLE: &str = r##"
-function Graph() {}
-var mxUtils = {
+const FAKE_SOURCE_TEXT_MX_UTILS: &str = r###"var mxUtils = {
   getLightDarkColor(value) {
     const key = String(value).toLowerCase();
     const dark = ["#000000", "#ffffff"].includes(key) ? "#121212" : "#507a14";
@@ -191,18 +171,9 @@ var mxUtils = {
     };
   },
 };
-const Editor = {
-  convertHtmlToText(value) {
-    return String(value);
-  },
-};
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "80");
-  svg.setAttribute("height", "30");
-  svg.setAttribute("viewBox", "0 0 80 30");
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+"###;
+
+const FAKE_SOURCE_TEXT_SVG_BODY: &str = r###"  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
   group.setAttribute("data-cell-id", "cell");
   const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
   rect.setAttribute("x", "0");
@@ -216,12 +187,4 @@ GraphViewer.createViewerForElement = function createViewerForElement(_container,
   group.appendChild(rect);
   group.appendChild(text);
   svg.appendChild(group);
-  callback({
-    graph: {
-      getSvg() {
-        return svg;
-      },
-    },
-  });
-};
-"##;
+"###;

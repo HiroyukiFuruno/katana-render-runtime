@@ -38,11 +38,15 @@ git switch -c release/vX.Y.Z
 ## Phase 2: 実装と検証
 
 未完了 task を実装し、必要に応じて `tasks.md` を更新します。
-実装後は次を通します。
+実装後は変更に対応する整形・静的解析・AST検査・回帰テストと自己レビューを通します。通常のcommit hookも維持します。
+
+cleanなcommit済みソースを要求する性能・画像の証拠は、Phase 3のローカル実装commit後に生成します。commit前にその証拠を要求して順序を循環させません。未完了の公開条件は台帳に残し、ローカル実装commitをリリース合格として扱いません。
 
 ```bash
-just check
-just VERSION=vX.Y.Z release-check
+just fmt-check
+just lint
+just ast-lint
+just root-test-and-coverage
 git diff --check
 ```
 
@@ -56,8 +60,19 @@ git diff --check
 git status --short --branch
 git add <release に必要な files>
 git commit -m "release: vX.Y.Z リリース準備 Refs #${issue_number}"
+```
+
+ローカル実装commit後、working treeがcleanであることを確認し、既存の正式producerでそのHEADに対する性能・画像の証拠を生成します。`html-performance-catalog-captures` と `html-performance-evidence-produce` 等の既存recipeを使い、古いHEADの証拠や未完の検査を成功へ置き換えません。
+
+その後、同じ最新HEADで完全品質ゲート、スコア・性能・coverageを含む全公開条件を確認してからpushします。
+
+```bash
+just VERSION=vX.Y.Z release-check
+git diff --check
 git push -u origin release/vX.Y.Z
 ```
+
+失敗時は公開せず修正へ戻り、変更に対応する検証・通常commit・最新HEADの証拠生成・完全ゲートをやり直します。中間commitによってDraft作成前、Ready化、merge、公開の合格条件を省略しません。
 
 `git push --no-verify` は使いません。
 
@@ -67,7 +82,7 @@ Draft PRを作成し、最新 HEAD に対して `@codex review` と自己レビ�
 
 ## Phase 5: PR gate
 
-各指摘を個別に修正・検証・pushし、該当threadへreplyしてresolveする。P0/P1は必須対応、P2/P3は要件・互換性・DoDへの影響を根拠付きで判断する。HEADが変わった場合は最新 HEADでレビューをやり直す。
+[リリース手順のコードフリーズ規則](../../../docs/release.md#prレビューのコードフリーズ)に従って今回修正する指摘と後続Issueへ送る指摘を決め、該当スレッドに修正結果またはIssueのリンクを返信してから解決する。HEADが変わった場合は最新HEADでレビューをやり直す。
 
 ## Phase 6: Ready 化と merge 承認
 

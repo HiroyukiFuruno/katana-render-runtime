@@ -5,6 +5,7 @@ import io
 import json
 import tarfile
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -138,16 +139,45 @@ class PackagedRuntimeTest(unittest.TestCase):
                 (destination / unsafe_name).unlink()
 
     def test_test_command_keeps_registry_lock_and_enables_offline_vendor_source(self) -> None:
+        target = Path("target/package/runtime/target")
         command = packaged.packaged_test_command(
             ["rtk", "proxy", "cargo"],
             Path("target/package/runtime/Cargo.toml"),
             Path("target/package/vendor"),
             1,
+            target,
         )
         self.assertIn("--locked", command)
         self.assertIn("--offline", command)
+        self.assertEqual(command[3:5], ["nextest", "run"])
+        self.assertIn("--lib", command)
+        self.assertIn("--no-fail-fast", command)
+        self.assertEqual(command[command.index("--retries") + 1], "0")
+        workspace = tomllib.loads((packaged.ROOT / "Cargo.toml").read_text(encoding="utf-8"))
+        self.assertIn("profile.dev.debug=" + json.dumps(workspace["profile"]["dev"]["debug"]), command)
         self.assertIn('source.crates-io.replace-with="packaged-runtime-test-vendor"', command)
+        self.assertEqual(command[command.index("--target-dir") + 1], str(target))
         self.assertEqual(command[-2:], ["--test-threads", "1"])
+
+    def test_packaged_workspace_receives_only_regular_public_fixtures(self) -> None:
+        for name, member_type in (("tests/fixtures/sample.svg", tarfile.REGTYPE),
+                                  ("private/source.html", tarfile.REGTYPE),
+                                  ("tests/fixtures/link.svg", tarfile.SYMTYPE)):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                archive = root / "fixtures.tar"
+                member = tarfile.TarInfo(name)
+                member.type = member_type
+                content = b"<svg/>" if member_type == tarfile.REGTYPE else b""
+                member.size = len(content)
+                with tarfile.open(archive, "w") as output:
+                    output.addfile(member, io.BytesIO(content))
+                if name == "tests/fixtures/sample.svg":
+                    packaged._extract_public_fixtures(archive, root)
+                    self.assertEqual((root / name).read_bytes(), content)
+                else:
+                    with self.assertRaises(ValueError):
+                        packaged._extract_public_fixtures(archive, root)
 
 
 if __name__ == "__main__":

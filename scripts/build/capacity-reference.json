@@ -1,0 +1,10 @@
+{
+  "schema": "krr-capacity-reference-v2",
+  "id": "krr-v0.4.24-fixed-capacity-v2",
+  "baseline_bytes": 8053063680,
+  "factor": 2.0,
+  "metric": "unique-inode-allocated-bytes",
+  "metric_version": 1,
+  "baseline_observed_at": 1795088119.546789,
+  "source_samples_sha256": "17d79da95608a345358f86cfe0d943518127e23a4d6e4248950cf8f3e5025034"
+}

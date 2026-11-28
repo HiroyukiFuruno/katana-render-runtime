@@ -1,4 +1,5 @@
 use super::DrawioJsRuntimeOps;
+use super::test_support::fake_color_bundle;
 use crate::markdown::color_preset::DiagramColorPreset;
 
 #[test]
@@ -23,12 +24,13 @@ fn temp_runtime_path(prefix: &str) -> std::path::PathBuf {
 }
 
 fn fake_neutral_source_fill_bundle() -> &'static str {
-    FAKE_NEUTRAL_SOURCE_FILL_BUNDLE
+    static BUNDLE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BUNDLE
+        .get_or_init(|| fake_color_bundle(NEUTRAL_COLOR_HELPER, NEUTRAL_FILL_BODY))
+        .as_str()
 }
 
-const FAKE_NEUTRAL_SOURCE_FILL_BUNDLE: &str = r##"
-function Graph() {}
-var mxUtils = {
+const NEUTRAL_COLOR_HELPER: &str = r##"var mxUtils = {
   getLightDarkColor(value) {
     const key = String(value).toLowerCase();
     return {
@@ -38,18 +40,9 @@ var mxUtils = {
     };
   },
 };
-const Editor = {
-  convertHtmlToText(value) {
-    return String(value);
-  },
-};
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "80");
-  svg.setAttribute("height", "30");
-  svg.setAttribute("viewBox", "0 0 80 30");
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+"##;
+
+const NEUTRAL_FILL_BODY: &str = r##"  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
   group.setAttribute("data-cell-id", "cell");
   const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
   rect.setAttribute("x", "0");
@@ -59,12 +52,4 @@ GraphViewer.createViewerForElement = function createViewerForElement(_container,
   rect.setAttribute("fill", "#000000");
   group.appendChild(rect);
   svg.appendChild(group);
-  callback({
-    graph: {
-      getSvg() {
-        return svg;
-      },
-    },
-  });
-};
 "##;

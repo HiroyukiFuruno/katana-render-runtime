@@ -1,0 +1,266 @@
+use super::{
+    BOLD_WEIGHT, FINAL_GLYPH_ORIGIN, NORMAL_WEIGHT, VIEWPORT_HEIGHT, VIEWPORT_WIDTH,
+    assert_html_frame, assert_valid_paint_evidence, open_html_with_audit,
+};
+
+#[path = "svg_rasterize_html_font_arial_locale_tests.rs"]
+mod arial_locale_tests;
+
+const ZH_HANS_PAGE_START: &str = "<!doctype html><html lang=\"zh-Hans\"><body>";
+const ZH_HANS_BOLD: &str =
+    "<h1 style=\"font-family:system-ui,sans-serif;font-size:32px;font-weight:700\">装</h1>";
+const ZH_HANS_PAGE_END: &str = "</body></html>";
+
+#[test]
+fn actual_layout_regular_system_ui_raster_uses_w4_and_latin_sfns() -> Result<(), String> {
+    assert_actual_layout_weight_faces(NORMAL_WEIGHT, ".HiraKakuInterface-W4")
+}
+
+#[test]
+fn actual_layout_bold_system_ui_raster_uses_w6_and_latin_sfns() -> Result<(), String> {
+    assert_actual_layout_weight_faces(BOLD_WEIGHT, ".HiraKakuInterface-W6")
+}
+
+#[test]
+fn actual_layout_zh_hans_system_ui_uses_coretext_han_and_kana_faces() -> Result<(), String> {
+    let html = [
+        ZH_HANS_PAGE_START,
+        "<p style=\"font-family:system-ui,sans-serif;font-weight:400\">装を</p>",
+        ZH_HANS_BOLD,
+        ZH_HANS_PAGE_END,
+    ]
+    .concat();
+    let (session, audit) =
+        open_html_with_audit(&html, FINAL_GLYPH_ORIGIN, VIEWPORT_WIDTH, VIEWPORT_HEIGHT)?;
+    assert_html_frame(&session)?;
+    assert_valid_paint_evidence(&audit)?;
+    assert_computed_weight(&audit, NORMAL_WEIGHT)?;
+    assert_computed_weight(&audit, BOLD_WEIGHT)?;
+    let trees = audit["finalGlyphTrees"]
+        .as_array()
+        .ok_or_else(|| "final glyph tree evidence is absent".to_owned())?;
+    assert_selected_variations(&audit, trees);
+    Ok(())
+}
+
+fn assert_selected_variations(audit: &serde_json::Value, trees: &[serde_json::Value]) {
+    const CHINESE_REGULAR_WEIGHT: f32 = 400.0;
+    const CHINESE_BOLD_WEIGHT: f32 = 700.0;
+    const KANA_FALLBACK_WEIGHT: f32 = 542.0;
+    const KANA_FALLBACK_OPTICAL_SIZE: f32 = 19.0;
+    type ExpectedFont<'a> = (u64, &'a str, &'a [(&'a str, f32)]);
+    let expected: &[ExpectedFont<'_>] = &[
+        (
+            NORMAL_WEIGHT,
+            ".PingFangUITextSC-Regular",
+            &[("wght", CHINESE_REGULAR_WEIGHT)],
+        ),
+        (
+            NORMAL_WEIGHT,
+            ".CJKSymbolsFallbackSC-Regular",
+            &[
+                ("wght", KANA_FALLBACK_WEIGHT),
+                ("opsz", KANA_FALLBACK_OPTICAL_SIZE),
+            ],
+        ),
+        (
+            BOLD_WEIGHT,
+            ".PingFangUIDisplaySC-Bold",
+            &[("wght", CHINESE_BOLD_WEIGHT)],
+        ),
+    ];
+    for &(weight, face, axes) in expected {
+        assert_uses_expected_face(audit, trees, weight, face, axes);
+    }
+}
+
+#[test]
+fn actual_layout_single_native_display_glyph_paints_ink() -> Result<(), String> {
+    const DARK_INK_LIMIT: u8 = 127;
+    let html = [ZH_HANS_PAGE_START, ZH_HANS_BOLD, ZH_HANS_PAGE_END].concat();
+    let (session, audit) =
+        open_html_with_audit(&html, FINAL_GLYPH_ORIGIN, VIEWPORT_WIDTH, VIEWPORT_HEIGHT)?;
+    assert_valid_paint_evidence(&audit)?;
+    let frame = session.latest_frame().ok_or("initial frame is absent")?;
+    assert!(
+        frame
+            .pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[3] != 0 && pixel[0] < DARK_INK_LIMIT),
+        "the standalone Chinese glyph painted no dark pixels"
+    );
+    Ok(())
+}
+
+fn assert_uses_expected_face(
+    audit: &serde_json::Value,
+    trees: &[serde_json::Value],
+    weight: u64,
+    expected: &str,
+    expected_axes: &[(&str, f32)],
+) {
+    assert!(
+        final_span_uses_face_matching(
+            trees,
+            weight,
+            |name| name == expected,
+            expected_axes,
+            |_| true
+        ),
+        "missing {expected} with {expected_axes:?} at weight {weight}; requested {:?}; glyph errors {:?}; observed faces {:?}",
+        rows_for_weight(audit, weight),
+        trees
+            .iter()
+            .map(|tree| &tree["glyphLayoutErrors"])
+            .collect::<Vec<_>>(),
+        trees
+            .iter()
+            .filter_map(|tree| tree["faces"].as_array())
+            .flatten()
+            .filter_map(|face| face["source"]["post_script_name"].as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+fn rows_for_weight(audit: &serde_json::Value, weight: u64) -> Vec<&serde_json::Value> {
+    audit["htmlFontMarkups"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|row| row["computedWeight"] == weight)
+        .collect()
+}
+
+fn assert_actual_layout_weight_faces(
+    weight: u64,
+    interface_postscript: &str,
+) -> Result<(), String> {
+    let html = weighted_system_ui_html(weight);
+    let (session, audit) =
+        open_html_with_audit(&html, FINAL_GLYPH_ORIGIN, VIEWPORT_WIDTH, VIEWPORT_HEIGHT)?;
+    assert_html_frame(&session)?;
+    assert_valid_paint_evidence(&audit)?;
+    assert_weight_and_final_faces(&audit, weight, interface_postscript)
+}
+
+fn weighted_system_ui_html(weight: u64) -> String {
+    format!(
+        "<!doctype html><html lang=\"ja\"><body><p style=\"font-family:system-ui,sans-serif;font-weight:{weight}\">A日本</p></body></html>"
+    )
+}
+
+fn assert_weight_and_final_faces(
+    audit: &serde_json::Value,
+    weight: u64,
+    interface_postscript: &str,
+) -> Result<(), String> {
+    assert_computed_weight(audit, weight)?;
+    let trees = audit["finalGlyphTrees"]
+        .as_array()
+        .ok_or_else(|| "final glyph tree evidence is absent".to_owned())?;
+    assert_eq!(audit["finalGlyphDropped"], 0);
+    assert_eq!(audit["finalGlyphErrors"], serde_json::json!([]));
+    assert!(trees.iter().all(|tree| {
+        tree["glyphLayoutDropped"] == 0 && tree["glyphLayoutErrors"] == serde_json::json!([])
+    }));
+    assert!(final_span_uses_face(trees, weight, interface_postscript));
+    assert!(final_span_uses_face_prefix(trees, weight, ".SFNS"));
+    Ok(())
+}
+
+fn assert_computed_weight(audit: &serde_json::Value, weight: u64) -> Result<(), String> {
+    let markup = audit["htmlFontMarkups"]
+        .as_array()
+        .and_then(|markups| {
+            markups.iter().find(|row| {
+                row["computedWeight"] == weight && row["resolvedRunStatus"] == "resolved"
+            })
+        })
+        .ok_or_else(|| format!("layout did not resolve font weight {weight}"))?;
+    assert_eq!(markup["effectiveSvgWeight"], weight);
+    Ok(())
+}
+
+fn final_span_uses_face(trees: &[serde_json::Value], weight: u64, postscript: &str) -> bool {
+    final_span_uses_face_matching(trees, weight, |name| name == postscript, &[], |_| true)
+}
+
+fn final_span_uses_face_prefix(trees: &[serde_json::Value], weight: u64, prefix: &str) -> bool {
+    let Some(actual_wght) = u16::try_from(weight).ok().map(f32::from) else {
+        return false;
+    };
+    final_span_uses_face_matching(
+        trees,
+        weight,
+        |name| name.starts_with(prefix),
+        &[("wght", actual_wght)],
+        |_| true,
+    )
+}
+
+fn final_span_uses_face_matching(
+    trees: &[serde_json::Value],
+    weight: u64,
+    matches_name: impl Fn(&str) -> bool,
+    expected_axes: &[(&str, f32)],
+    matches_span: impl Fn(&serde_json::Value) -> bool,
+) -> bool {
+    trees.iter().any(|tree| {
+        tree_has_weighted_face(tree, weight, &matches_name, expected_axes, &matches_span)
+    })
+}
+
+fn tree_has_weighted_face(
+    tree: &serde_json::Value,
+    weight: u64,
+    matches_name: &impl Fn(&str) -> bool,
+    expected_axes: &[(&str, f32)],
+    matches_span: &impl Fn(&serde_json::Value) -> bool,
+) -> bool {
+    let Some(faces) = tree["faces"].as_array() else {
+        return false;
+    };
+    faces.iter().any(|face| {
+        face["glyphCount"].as_u64().is_some_and(|count| count > 0)
+            && face["source"]["post_script_name"]
+                .as_str()
+                .is_some_and(matches_name)
+            && tree_span_uses_face(tree, &face["faceId"], weight, expected_axes, matches_span)
+    })
+}
+
+fn tree_span_uses_face(
+    tree: &serde_json::Value,
+    face_id: &serde_json::Value,
+    weight: u64,
+    expected_axes: &[(&str, f32)],
+    matches_span: &impl Fn(&serde_json::Value) -> bool,
+) -> bool {
+    tree["textSpans"].as_array().is_some_and(|spans| {
+        spans.iter().any(|span| {
+            matches_span(span)
+                && span["requested"]["weight"] == weight
+                && span["glyphCount"].as_u64().is_some_and(|count| count > 0)
+                && expected_axes
+                    .iter()
+                    .all(|&(tag, value)| span_has_variation(span, tag, value))
+                && span["faces"].as_array().is_some_and(|faces| {
+                    faces
+                        .iter()
+                        .any(|span_face| span_face["faceId"] == *face_id)
+                })
+        })
+    })
+}
+
+fn span_has_variation(span: &serde_json::Value, tag: &str, expected: f32) -> bool {
+    span["layoutVariations"]
+        .as_array()
+        .is_some_and(|variations| {
+            variations.iter().any(|variation| {
+                variation["tag"] == tag && variation["value"].as_f64() == Some(f64::from(expected))
+            })
+        })
+}

@@ -1,0 +1,861 @@
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import os
+import secrets
+import subprocess
+import tempfile
+import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+from typing import cast
+from unittest.mock import patch
+
+import native_coverage_local_anchor as local_anchor
+import native_coverage_result_test as fixture_helpers
+import runtime_script_definitions_inputs as definitions
+import runtime_script_cache_cli as cache_cli
+import runtime_script_identity as identity_collector
+import runtime_script_producer as producer_runner
+import runtime_script_profiles as profiles
+import runtime_script_recipe as recipe_reader
+import runtime_script_result as result
+from runtime_script_result_test import JUNIT
+import runtime_script_result_verify as result_verify
+import runtime_script_tool_fingerprint_inputs as pilot
+
+PRODUCER = cache_cli.PRODUCER
+IDENTITY = "a" * 64
+SOURCE_MANIFEST = "b" * 64
+SOURCE_INPUTS = "f" * 64
+RECIPE = "c" * 64
+TOOLS = "d" * 64
+
+
+def identity_report(
+    identity: str = IDENTITY,
+    *,
+    producer: str = PRODUCER,
+    cacheable: bool = True,
+    source_manifest: str = SOURCE_MANIFEST,
+    source_inputs: str = SOURCE_INPUTS,
+    recipe: str = RECIPE,
+    tools: str = TOOLS,
+    input_digest: str = "e" * 64,
+    schema: str = "krr-runtime-script-identity-v2",
+) -> dict[str, object]:
+    return {
+        "schema": schema,
+        "producer": producer,
+        "cacheable": cacheable,
+        "missReasons": [] if cacheable else ["collector_unavailable"],
+        "sourceManifestSha256": source_manifest,
+        "sourceInputsSha256": source_inputs,
+        "sourceInputScope": ("krr-tool-fingerprint-profile-inputs-v1"
+                             if producer == "runtime-unused-tool-fingerprint"
+                             else "krr-native-coverage-source-inputs-v1"),
+        "recipeSha256": recipe,
+        "toolEnvironmentSha256": tools,
+        "inputSha256": input_digest,
+        "identitySha256": identity if cacheable else None,
+        "moonTaskHash": None,
+        "diagnostic": ({"inputComponents": {name: "a" * 64 for name in cache_cli.PILOT_COMPONENTS},
+                        "environmentNames": ["PATH"], "runtimeTool": "b" * 64,
+                        "pythonContext": "c" * 64}
+                       if producer == "runtime-unused-tool-fingerprint" else None),
+    }
+
+
+class RuntimeScriptCacheCliTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+        fixture_helpers.initialize_fixture_repository(self.root)
+
+    def test_pilot_reuse_holds_lease_and_executes_no_groups(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        identity = identity_report(producer=producer)
+        lease = self.root / "lease"
+        with (
+            patch.object(producer_runner, "_lease", return_value=(lease, 1, 2)),
+            patch.object(producer_runner, "_release_lease") as release,
+            patch.object(identity_collector, "collect_identity_report", return_value=identity),
+            patch.object(cache_cli, "_validate_report", return_value={"valid": True}),
+            patch.object(cache_cli, "run_current") as run,
+        ):
+            report = cache_cli.ensure_current(self.root, producer)
+        self.assertEqual(report["executedGroups"], 0)
+        self.assertFalse(report["recovered"])
+        self.assertEqual(report["diagnostic"], identity["diagnostic"])
+        release.assert_called_once_with(lease, 1, 2)
+        run.assert_not_called()
+
+    def prepare_profile_receipt(self, producer: str, identity: str = IDENTITY) -> Path:
+        epoch = local_anchor.prepare(self.root, producer, identity)
+        if epoch is None:
+            raise AssertionError("profile anchor is unavailable")
+        directory = self.root / result.RECEIPT_DIRECTORY
+        producer_runner._ensure_directory(directory)
+        relative = f"{result.RECEIPT_DIRECTORY}/{producer}-current-group-001.xml"
+        (self.root / relative).write_bytes(JUNIT)
+        receipt_path = directory / f"{producer}.json"
+        receipt = result.make_receipt(producer, identity, epoch, [(relative, JUNIT)], 0)
+        result.commit_receipt(self.root, producer, identity, epoch, receipt_path, receipt)
+        return receipt_path
+
+    def test_definitions_collected_identity_reuses_real_receipt(self) -> None:
+        producer = definitions.PROFILE
+        recipe = recipe_reader.RuntimeScriptRecipe(profiles.producer_recipe(producer), RECIPE, ())
+        with (patch.object(identity_collector, "_source_state", return_value=(SOURCE_MANIFEST, SOURCE_INPUTS)),
+              patch.object(identity_collector, "_pilot_facts", return_value=("8" * 64, {"scope": "pilot"})),
+              patch.object(identity_collector, "_tool_fingerprint",
+                           side_effect=identity_collector._CollectionFailure("unavailable")),
+              patch.object(definitions, "collect", return_value="7" * 64),
+              patch.object(recipe_reader, "read_runtime_script_recipe", return_value=recipe),
+              patch.object(cache_cli, "run_current") as run):
+            collected = identity_collector.collect_identity_report(self.root, producer)
+            identity = collected["identitySha256"]
+            self.assertIsInstance(identity, str)
+            if not isinstance(identity, str):
+                raise AssertionError("identity unavailable")
+            self.prepare_profile_receipt(producer, identity)
+            report = cache_cli.ensure_current(self.root, producer)
+        self.assertEqual(collected["sourceInputScope"], definitions.SEMANTIC_SCOPE)
+        self.assertEqual(report["executedGroups"], 0)
+        self.assertFalse(report["recovered"])
+        run.assert_not_called()
+        self.assert_no_profile_leases()
+
+    def test_semantic_scope_is_restricted_to_definitions_profile(self) -> None:
+        for producer in profiles.RUNTIME_SCRIPT_PROFILES:
+            if producer == definitions.PROFILE:
+                continue
+            with self.subTest(producer=producer):
+                report = identity_report(producer=producer)
+                report["sourceInputScope"] = definitions.SEMANTIC_SCOPE
+                with self.assertRaisesRegex(result.RuntimeScriptResultError, "identity is unavailable"):
+                    cache_cli._validate_report(self.root, producer, report)
+        invalid_scopes: tuple[object, ...] = ("unknown-scope", [], None)
+        for scope in invalid_scopes:
+            with self.subTest(scope=scope):
+                report = identity_report(producer=definitions.PROFILE)
+                report["sourceInputScope"] = scope
+                with self.assertRaisesRegex(result.RuntimeScriptResultError, "identity is unavailable"):
+                    cache_cli._validate_report(self.root, definitions.PROFILE, report)
+
+    def prepare_all_profile_receipts(self) -> dict[str, dict[str, object]]:
+        reports = {}
+        for producer in profiles.RUNTIME_SCRIPT_PROFILES:
+            self.prepare_profile_receipt(producer)
+            reports[producer] = identity_report(producer=producer)
+        return reports
+
+    def assert_no_profile_leases(self, *, except_producer: str | None = None) -> None:
+        for producer in profiles.RUNTIME_SCRIPT_PROFILES:
+            if producer != except_producer:
+                self.assertFalse(
+                    (self.root / result.RECEIPT_DIRECTORY / f".{producer}.lease").exists(),
+                    f"lease remained for {producer}",
+                )
+
+    def test_ensure_all_reuses_stable_receipts_under_profile_leases(self) -> None:
+        reports = self.prepare_all_profile_receipts()
+        original_verify = result_verify.verify_receipt
+        verified: list[str] = []
+
+        def verify(repo: Path, producer: str, identity: str, epoch: str,
+                   receipt: Path) -> dict[str, object]:
+            self.assertTrue((repo / result.RECEIPT_DIRECTORY / f".{producer}.lease").is_file())
+            verified_receipt = original_verify(repo, producer, identity, epoch, receipt)
+            verified.append(producer)
+            return verified_receipt
+
+        with (
+            patch.object(identity_collector, "collect_fixed_leaf_identity_reports", return_value=reports),
+            patch.object(result_verify, "verify_receipt", side_effect=verify),
+            patch.object(cache_cli, "run_current") as run,
+        ):
+            report = cache_cli.ensure_all(self.root)
+        self.assertFalse(report["recovered"])
+        self.assertCountEqual(verified, list(profiles.RUNTIME_SCRIPT_PROFILES) * 2)
+        validated = cast(list[dict[str, object]], report["producers"])
+        self.assertCountEqual([row["producer"] for row in validated], profiles.RUNTIME_SCRIPT_PROFILES)
+        self.assertEqual(len(validated), len(profiles.RUNTIME_SCRIPT_PROFILES))
+        self.assertTrue(all(row["valid"] is True for row in validated))
+        run.assert_not_called()
+        self.assert_no_profile_leases()
+
+    def test_ensure_all_rejects_active_profile_owner_without_leaking_leases(self) -> None:
+        reports = self.prepare_all_profile_receipts()
+        producer = sorted(profiles.RUNTIME_SCRIPT_PROFILES)[-1]
+        lease, device, inode = producer_runner._lease(self.root, producer)
+        try:
+            with (
+                patch.object(identity_collector, "collect_fixed_leaf_identity_reports", return_value=reports),
+                patch.object(cache_cli, "run_current") as run,
+                self.assertRaises(producer_runner.RuntimeScriptProducerError),
+            ):
+                cache_cli.ensure_all(self.root)
+            run.assert_not_called()
+            self.assertTrue(lease.is_file())
+            self.assert_no_profile_leases(except_producer=producer)
+        finally:
+            producer_runner._release_lease(lease, device, inode)
+        self.assert_no_profile_leases()
+
+    def test_ensure_all_rejects_changed_source_or_tool_during_reuse(self) -> None:
+        for changed in ("source", "tools"):
+            with self.subTest(changed=changed):
+                before = self.prepare_all_profile_receipts()
+                after = dict(before)
+                producer = sorted(profiles.RUNTIME_SCRIPT_PROFILES)[-1]
+                after[producer] = identity_report(
+                    "7" * 64,
+                    producer=producer,
+                    input_digest="8" * 64,
+                    source_manifest="9" * 64 if changed == "source" else SOURCE_MANIFEST,
+                    source_inputs="9" * 64 if changed == "source" else SOURCE_INPUTS,
+                    tools="9" * 64 if changed == "tools" else TOOLS,
+                )
+                with (
+                    patch.object(identity_collector, "collect_fixed_leaf_identity_reports", side_effect=[before, after]),
+                    patch.object(cache_cli, "run_current", side_effect=result.RuntimeScriptResultError("recovery required")),
+                    self.assertRaises(result.RuntimeScriptResultError),
+                ):
+                    cache_cli.ensure_all(self.root)
+                self.assert_no_profile_leases()
+
+    def test_ensure_all_releases_leases_before_recovering_tampered_receipt(self) -> None:
+        reports = self.prepare_all_profile_receipts()
+        producer = sorted(profiles.RUNTIME_SCRIPT_PROFILES)[-1]
+        receipt = self.root / result.RECEIPT_DIRECTORY / f"{producer}.json"
+        receipt.write_bytes(receipt.read_bytes() + b" ")
+
+        def recover(repo: Path, profile: str) -> dict[str, object]:
+            self.assertEqual(repo, self.root)
+            self.assertEqual(profile, producer)
+            self.assert_no_profile_leases()
+            self.prepare_profile_receipt(profile)
+            return {"producer": profile, "valid": True, "executedGroups": 1}
+
+        with (
+            patch.object(identity_collector, "collect_fixed_leaf_identity_reports", return_value=reports),
+            patch.object(cache_cli, "run_current", side_effect=recover),
+        ):
+            report = cache_cli.ensure_all(self.root)
+        self.assertTrue(report["recovered"])
+        self.assert_no_profile_leases()
+
+    def test_all_fixed_profiles_reuse_only_verified_stable_receipts(self) -> None:
+        for producer in profiles.RUNTIME_SCRIPT_PROFILES:
+            with self.subTest(producer=producer):
+                self.prepare_profile_receipt(producer)
+                snapshot = identity_report(producer=producer)
+                with (
+                    patch.object(identity_collector, "collect_identity_report", return_value=snapshot) as collect,
+                    patch.object(result_verify, "verify_receipt", wraps=result_verify.verify_receipt) as verify,
+                    patch.object(cache_cli, "run_current") as run,
+                ):
+                    report = cache_cli.ensure_current(self.root, producer)
+                self.assertEqual(collect.call_count, 2)
+                self.assertEqual(verify.call_count, 2)
+                self.assertEqual(report["executedGroups"], 0)
+                self.assertFalse(report["recovered"])
+                self.assertEqual("diagnostic" in report, producer == pilot.PROFILE)
+                self.assertFalse((self.root / result.RECEIPT_DIRECTORY / f".{producer}.lease").exists())
+                run.assert_not_called()
+
+    def test_all_fixed_profiles_release_lease_before_recovery(self) -> None:
+        for producer in profiles.RUNTIME_SCRIPT_PROFILES:
+            for case in ("missing", "tampered", "changed"):
+                with self.subTest(producer=producer, case=case):
+                    receipt = self.prepare_profile_receipt(producer)
+                    before = identity_report(producer=producer)
+                    after = identity_report(producer=producer, source_manifest="9" * 64)
+                    if case == "missing":
+                        receipt.unlink()
+                    elif case == "tampered":
+                        receipt.write_bytes(receipt.read_bytes() + b" ")
+
+                    def rerun(repo: Path, profile: str) -> dict[str, object]:
+                        self.assertFalse((repo / result.RECEIPT_DIRECTORY / f".{profile}.lease").exists())
+                        return {"producer": profile, "valid": True, "executedGroups": 1}
+
+                    reports = [before, after] if case == "changed" else [before]
+                    with (
+                        patch.object(identity_collector, "collect_identity_report", side_effect=reports),
+                        patch.object(cache_cli, "run_current", side_effect=rerun) as run,
+                    ):
+                        report = cache_cli.ensure_current(self.root, producer)
+                    self.assertTrue(report["recovered"])
+                    self.assertEqual(report["executedGroups"], 1)
+                    self.assertEqual("reuseAttempt" in report, producer == pilot.PROFILE)
+                    run.assert_called_once_with(self.root, producer)
+
+    def test_pilot_diagnostic_rejects_unexpected_fields(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        snapshot = identity_report(producer=producer)
+        snapshot["diagnostic"] = {"secret": "private-fixture"}
+        with self.assertRaisesRegex(result.RuntimeScriptResultError, "diagnostic shape"):
+            cache_cli._pilot_diagnostic(snapshot)
+
+    def test_pilot_diagnostic_accepts_printable_environment_names_without_values(self) -> None:
+        snapshot = identity_report(producer="runtime-unused-tool-fingerprint")
+        diagnostic = cast(dict[str, object], snapshot["diagnostic"])
+        diagnostic["environmentNames"] = ["PATH", "fixture-name"]
+        self.assertEqual(cache_cli._pilot_diagnostic(snapshot)["environmentNames"],
+                         ["PATH", "fixture-name"])
+
+    def test_pilot_diagnostic_rejects_unsafe_environment_names(self) -> None:
+        for name in ("", "bad\nname", "bad\x00name", "name=value"):
+            with self.subTest(name=name):
+                snapshot = identity_report(producer="runtime-unused-tool-fingerprint")
+                diagnostic = cast(dict[str, object], snapshot["diagnostic"])
+                diagnostic["environmentNames"] = [name]
+                with self.assertRaisesRegex(result.RuntimeScriptResultError, "diagnostic fields"):
+                    cache_cli._pilot_diagnostic(snapshot)
+
+    def test_pilot_key_preserves_stdout_and_projects_only_safe_fields(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        snapshot = identity_report(producer=producer)
+        snapshot["privateField"] = "private-fixture"
+        epoch = "9" * 64
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.dict(os.environ, {"KRR_RUNTIME_SCRIPT_KEY_DIAGNOSTICS": "1"}),
+            patch.object(identity_collector, "collect_identity_report", return_value=snapshot) as collect,
+            patch.object(local_anchor, "prepare", return_value=epoch),
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
+            exit_code = cache_cli.main(["key", "--repo", str(self.root), "--producer", producer])
+        fingerprint = hashlib.sha256(
+            f"krr-runtime-script-key-v1\0{IDENTITY}\0{epoch}".encode()
+        ).hexdigest()
+        self.assertEqual(exit_code, 0)
+        expected = {
+            "schema": "krr-runtime-script-key-v1", "producer": producer,
+            "fingerprint": fingerprint,
+        }
+        self.assertEqual(stdout.getvalue(), json.dumps(expected, sort_keys=True, separators=(",", ":")) + "\n")
+        self.assertEqual(stderr.getvalue(), "")
+        directory = self.root / result.RECEIPT_DIRECTORY / "key-diagnostics"
+        files = list(directory.glob("*.json"))
+        self.assertEqual(len(files), 1)
+        self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(files[0].stat().st_mode & 0o777, 0o600)
+        contents = files[0].read_text()
+        projection = json.loads(contents)
+        self.assertEqual(set(projection), {"schema", "identity", "diagnostic"})
+        self.assertEqual(projection["identity"], cache_cli._pilot_identity_digests(snapshot))
+        self.assertEqual(projection["diagnostic"], snapshot["diagnostic"])
+        self.assertNotIn("private-fixture", contents)
+        self.assertNotIn(epoch, contents)
+        collect.assert_called_once_with(self.root, producer)
+
+    def test_pilot_key_diagnostics_are_exclusive_and_opt_in(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        snapshot = identity_report(producer=producer)
+        flag = "KRR_RUNTIME_SCRIPT_KEY_DIAGNOSTICS"
+        directory = self.root / result.RECEIPT_DIRECTORY / "key-diagnostics"
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(identity_collector, "collect_identity_report", return_value=snapshot),
+            patch.object(local_anchor, "prepare", return_value="9" * 64),
+            patch.object(secrets, "token_hex", return_value="fixed"),
+        ):
+            cache_cli.current_key(self.root, producer)
+            self.assertFalse(directory.exists())
+            os.environ[flag] = "0"
+            with self.assertRaisesRegex(result.RuntimeScriptResultError, "flag is invalid"):
+                cache_cli.current_key(self.root, producer)
+            os.environ[flag] = "1"
+            cache_cli.current_key(self.root, producer)
+            files = list(directory.glob("*.json"))
+            self.assertEqual(len(files), 1)
+            original = files[0].read_bytes()
+            with self.assertRaises(FileExistsError):
+                cache_cli.current_key(self.root, producer)
+            self.assertEqual(files[0].read_bytes(), original)
+
+    def test_pilot_key_diagnostics_reject_symlink_directory(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        directory = self.root / result.RECEIPT_DIRECTORY
+        directory.mkdir(parents=True)
+        (directory / "key-diagnostics").symlink_to(self.root, target_is_directory=True)
+        with (
+            patch.dict(os.environ, {"KRR_RUNTIME_SCRIPT_KEY_DIAGNOSTICS": "1"}),
+            patch.object(identity_collector, "collect_identity_report", return_value=identity_report(producer=producer)),
+            patch.object(local_anchor, "prepare", return_value="9" * 64),
+            self.assertRaises(producer_runner.RuntimeScriptProducerError),
+        ):
+            cache_cli.current_key(self.root, producer)
+
+    def test_pilot_execution_returns_verified_snapshot_diagnostic(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        snapshot = identity_report(producer=producer)
+        run = producer_runner.RuntimeScriptRun(
+            producer, IDENTITY, "epoch", 0, "raw", "receipt.json", (("result.xml", b"result"),)
+        )
+        with (
+            patch.object(identity_collector, "collect_execution_snapshot", return_value=snapshot),
+            patch.object(recipe_reader, "read_runtime_script_recipe", return_value=self.recipe()),
+            patch.object(producer_runner, "run_runtime_script", return_value=run),
+            patch.object(result_verify, "verify_receipt", return_value={}),
+        ):
+            report = cache_cli.run_current(self.root, producer)
+        self.assertEqual(report["diagnostic"], snapshot["diagnostic"])
+        self.assertEqual(report["executedGroups"], 1)
+
+    def test_pilot_changed_source_releases_lease_before_fallback(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        before = identity_report(producer=producer)
+        after = identity_report(producer=producer, source_manifest="9" * 64)
+        lease = self.root / "lease"
+        with (
+            patch.object(producer_runner, "_lease", return_value=(lease, 1, 2)),
+            patch.object(producer_runner, "_release_lease") as release,
+            patch.object(identity_collector, "collect_identity_report", side_effect=[before, after]),
+            patch.object(cache_cli, "_validate_report", return_value={"valid": True}),
+            patch.object(cache_cli, "run_current", return_value={"valid": True, "executedGroups": 1}) as run,
+        ):
+            report = cache_cli.ensure_current(self.root, producer)
+        self.assertTrue(report["recovered"])
+        self.assertEqual(report["executedGroups"], 1)
+        attempt = cast(dict[str, object], report["reuseAttempt"])
+        self.assertEqual(cast(dict[str, object], attempt["identity"])["sourceManifestSha256"], SOURCE_MANIFEST)
+        release.assert_called_once_with(lease, 1, 2)
+        run.assert_called_once_with(self.root, producer)
+
+    def test_pilot_fallback_projects_prevalidation_state_under_lease(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        before = identity_report(producer=producer)
+        before["privateField"] = "private-fixture"
+        directory = self.root / result.RECEIPT_DIRECTORY
+        directory.mkdir(parents=True)
+        (directory / f"{producer}.json").write_text("unverified")
+        (directory / f"{producer}-current-group-001.xml").write_text("unverified")
+        lease = self.root / "lease"
+        with (
+            patch.object(producer_runner, "_lease", return_value=(lease, 1, 2)),
+            patch.object(producer_runner, "_release_lease") as release,
+            patch.object(identity_collector, "collect_identity_report", return_value=before),
+            patch.object(cache_cli, "_validate_report", side_effect=result.RuntimeScriptResultError("rejected")),
+            patch.object(cache_cli, "run_current", return_value={}) as run,
+        ):
+            def run_after_release(_repo: Path, _producer: str) -> dict[str, object]:
+                release.assert_called_once_with(lease, 1, 2)
+                return {}
+
+            run.side_effect = run_after_release
+            report = cache_cli.ensure_current(self.root, producer)
+        attempt = report["reuseAttempt"]
+        self.assertEqual(attempt, {
+            "receiptExists": True,
+            "currentJunitExists": True,
+            "receiptIdentityMatches": None,
+            "cacheable": True,
+            "identity": {key: before[key] for key in (
+                "sourceManifestSha256", "sourceInputsSha256", "recipeSha256",
+                "toolEnvironmentSha256", "inputSha256", "identitySha256",
+            )},
+        })
+        self.assertNotIn("private-fixture", str(report))
+        self.assertTrue(report["recovered"])
+
+    def test_pilot_reuse_attempt_rejects_non_digest_values(self) -> None:
+        before = identity_report(producer="runtime-unused-tool-fingerprint")
+        before["recipeSha256"] = "private-fixture"
+        attempt = cache_cli._pilot_reuse_attempt(self.root, before)
+        self.assertIsNone(cast(dict[str, object], attempt["identity"])["recipeSha256"])
+        self.assertFalse(attempt["receiptExists"])
+        self.assertFalse(attempt["currentJunitExists"])
+
+    def test_pilot_receipt_identity_comparison_is_diagnostic_only(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        directory = self.root / result.RECEIPT_DIRECTORY
+        directory.mkdir(parents=True)
+        receipt_path = directory / f"{producer}.json"
+        receipt = {"schema": result.SCHEMA, "producer": producer, "identitySha256": IDENTITY,
+                   "epoch": "e" * 64, "junitReports": []}
+        receipt_path.write_text(json.dumps(receipt))
+        self.assertTrue(cache_cli._pilot_receipt_identity_matches(self.root, IDENTITY))
+        self.assertFalse(cache_cli._pilot_receipt_identity_matches(self.root, "f" * 64))
+        receipt["identitySha256"] = "private-fixture"
+        receipt_path.write_text(json.dumps(receipt))
+        self.assertIsNone(cache_cli._pilot_receipt_identity_matches(self.root, IDENTITY))
+
+    def git_directory(self) -> Path:
+        result = subprocess.run(
+            ["git", "rev-parse", "--absolute-git-dir"],
+            cwd=self.root,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        return Path(result.stdout.strip())
+
+    def recipe(self) -> recipe_reader.RuntimeScriptRecipe:
+        return recipe_reader.RuntimeScriptRecipe(
+            recipe_reader.RECIPE_NAME,
+            RECIPE,
+            (("bun", "test", "--path-ignore-patterns", "tmp/**", "./scripts/runtime-bundles/fixed_test.ts"),),
+        )
+
+    def fake_run(
+        self, identity: str, receipt_bytes: bytes = b"fresh-success"
+    ) -> object:
+        def run(
+            repo: Path,
+            producer: str,
+            input_sha256: str,
+            recipe: recipe_reader.RuntimeScriptRecipe,
+        ) -> producer_runner.RuntimeScriptRun:
+            del input_sha256, recipe
+            epoch = local_anchor.prepare(repo, producer, identity)
+            if epoch is None or not local_anchor.begin_runtime_script(repo, producer, identity, epoch):
+                raise AssertionError("fake producer could not prepare anchor")
+            self.assertTrue(local_anchor.commit(repo, producer, identity, epoch, receipt_bytes))
+            return producer_runner.RuntimeScriptRun(
+                producer,
+                identity,
+                epoch,
+                0,
+                "tmp/quality/runtime-script-results/raw/run-test",
+                f"tmp/quality/runtime-script-results/{producer}.json",
+                (),
+            )
+
+        return run
+
+    def assert_run_current_rejects_identity_change(
+        self,
+        before: dict[str, object],
+        after: dict[str, object],
+        run_identity: str,
+    ) -> None:
+        with (
+            patch.object(
+                identity_collector,
+                "collect_execution_snapshot",
+                side_effect=[before, after],
+            ),
+            patch.object(
+                recipe_reader, "read_runtime_script_recipe", return_value=self.recipe()
+            ),
+            patch.object(
+                producer_runner,
+                "run_runtime_script",
+                side_effect=self.fake_run(run_identity),
+            ),
+            self.assertRaisesRegex(
+                result.RuntimeScriptResultError, "changed during execution"
+            ),
+        ):
+            cache_cli.run_current(self.root)
+
+        anchor_dir = self.git_directory() / local_anchor.DIRECTORY_NAME
+        current = local_anchor._read(anchor_dir, PRODUCER)
+        self.assertIsNotNone(current)
+        self.assertEqual(current["state"] if current else None, "pending")
+        current_epoch = str(current["epoch"] if current else "")
+        self.assertFalse(
+            local_anchor.verify(
+                self.root, PRODUCER, run_identity, current_epoch, b"fresh-success"
+            )
+        )
+
+    def test_same_source_current_key_is_stable_and_binds_source_pins(self) -> None:
+        with patch.object(
+            identity_collector,
+            "collect_identity_report",
+            return_value=identity_report(),
+        ) as collect:
+            first = cache_cli.current_key(self.root)
+            second = cache_cli.current_key(self.root)
+
+        self.assertEqual(first, second)
+        self.assertEqual(first["schema"], "krr-runtime-script-key-v1")
+        self.assertEqual(first["producer"], PRODUCER)
+        self.assertEqual(collect.call_count, 2)
+        report = collect.call_args.args
+        self.assertEqual(report[0], self.root)
+        self.assertEqual(report[1], PRODUCER)
+        anchor_dir = self.git_directory() / local_anchor.DIRECTORY_NAME
+        anchor_path = anchor_dir / local_anchor.PRODUCERS[PRODUCER]
+        self.assertTrue(anchor_path.is_file())
+        self.assertEqual(anchor_path.stat().st_mode & 0o777, 0o600)
+
+    def test_validation_failure_changes_key_and_rejects_old_success(self) -> None:
+        with patch.object(
+            identity_collector,
+            "collect_identity_report",
+            return_value=identity_report(),
+        ):
+            first_key = cache_cli.current_key(self.root)
+            anchor_dir = self.git_directory() / local_anchor.DIRECTORY_NAME
+            anchor_path = anchor_dir / local_anchor.PRODUCERS[PRODUCER]
+            old_anchor = local_anchor._read(anchor_dir, PRODUCER)
+            self.assertIsNotNone(old_anchor)
+            old_epoch = str(old_anchor["epoch"] if old_anchor else "")
+            old_success = b"old-success-receipt"
+            self.assertTrue(local_anchor.commit(self.root, PRODUCER, IDENTITY, old_epoch, old_success))
+            self.assertTrue(local_anchor.verify(self.root, PRODUCER, IDENTITY, old_epoch, old_success))
+
+            with patch.object(
+                result_verify,
+                "verify_receipt",
+                side_effect=result.RuntimeScriptResultError("stale receipt"),
+            ), self.assertRaises(result.RuntimeScriptResultError):
+                cache_cli.validate_current(self.root)
+
+            second_key = cache_cli.current_key(self.root)
+
+        self.assertNotEqual(first_key["fingerprint"], second_key["fingerprint"])
+        self.assertFalse(local_anchor.verify(self.root, PRODUCER, IDENTITY, old_epoch, old_success))
+        self.assertTrue(anchor_path.is_file())
+
+    def test_validation_success_keeps_key_and_anchor_epoch(self) -> None:
+        with patch.object(
+            identity_collector,
+            "collect_identity_report",
+            return_value=identity_report(),
+        ):
+            first_key = cache_cli.current_key(self.root)
+            anchor_dir = self.git_directory() / local_anchor.DIRECTORY_NAME
+            before = local_anchor._read(anchor_dir, PRODUCER)
+            self.assertIsNotNone(before)
+            with patch.object(result_verify, "verify_receipt", return_value={"producer": PRODUCER}):
+                self.assertTrue(cache_cli.validate_current(self.root)["valid"])
+            after = local_anchor._read(anchor_dir, PRODUCER)
+            second_key = cache_cli.current_key(self.root)
+
+        self.assertEqual(first_key, second_key)
+        self.assertEqual(before, after)
+
+    def test_validate_all_checks_each_fixed_profile(self) -> None:
+        reports = {
+            producer: identity_report(
+                f"{index + 1:064x}", producer=producer
+            )
+            for index, producer in enumerate(profiles.RUNTIME_SCRIPT_PROFILES)
+        }
+        with (
+            patch.object(
+                identity_collector,
+                "collect_fixed_leaf_identity_reports",
+                return_value=reports,
+            ) as collect,
+            patch.object(result_verify, "verify_receipt", return_value={"producer": PRODUCER}) as verify,
+        ):
+            result_report = cache_cli.validate_all(self.root)
+
+        self.assertTrue(result_report["valid"])
+        validated = result_report["producers"]
+        assert isinstance(validated, list)
+        self.assertEqual(len(validated), len(profiles.RUNTIME_SCRIPT_PROFILES))
+        self.assertEqual(collect.call_count, 1)
+        self.assertEqual(verify.call_count, len(profiles.RUNTIME_SCRIPT_PROFILES))
+
+    def test_validate_all_rejects_missing_or_mismatched_reports(self) -> None:
+        first = next(iter(profiles.RUNTIME_SCRIPT_PROFILES))
+        cases = [
+            {},
+            {first: identity_report(producer="wrong")},
+            {first: identity_report(producer=first, cacheable=False)},
+        ]
+        for reports in cases:
+            with self.subTest(reports=reports), patch.object(
+                identity_collector,
+                "collect_fixed_leaf_identity_reports",
+                return_value=reports,
+            ), self.assertRaises(result.RuntimeScriptResultError):
+                cache_cli.validate_all(self.root)
+
+    def test_legacy_identity_report_schema_is_rejected(self) -> None:
+        legacy = identity_report(schema="krr-runtime-script-identity-v1")
+        for entry in (
+            "bound_identity",
+            "validate_current",
+            "run_current_before",
+            "run_current_after",
+        ):
+            with self.subTest(entry=entry):
+                self.setUp()
+                if entry == "bound_identity":
+                    with (
+                        patch.object(
+                            identity_collector,
+                            "collect_identity_report",
+                            return_value=legacy,
+                        ),
+                        self.assertRaisesRegex(
+                            result.RuntimeScriptResultError, "identity is unavailable"
+                        ),
+                    ):
+                        cache_cli.bound_identity(self.root)
+                elif entry == "validate_current":
+                    with (
+                        patch.object(
+                            identity_collector,
+                            "collect_identity_report",
+                            return_value=legacy,
+                        ),
+                        self.assertRaisesRegex(
+                            result.RuntimeScriptResultError, "identity is unavailable"
+                        ),
+                    ):
+                        cache_cli.validate_current(self.root)
+                elif entry == "run_current_before":
+                    with (
+                        patch.object(
+                            identity_collector,
+                            "collect_execution_snapshot",
+                            return_value=legacy,
+                        ),
+                        patch.object(producer_runner, "run_runtime_script") as run,
+                        self.assertRaisesRegex(
+                            result.RuntimeScriptResultError,
+                            "current producer inputs are unavailable",
+                        ),
+                    ):
+                        cache_cli.run_current(self.root)
+                    run.assert_not_called()
+                else:
+                    run_identity = result.build_identity(PRODUCER, "e" * 64)
+                    self.assert_run_current_rejects_identity_change(
+                        identity_report(run_identity), legacy, run_identity
+                    )
+
+    def test_ensure_all_rechecks_batch_when_every_leaf_is_valid(self) -> None:
+        reports = {
+            producer: identity_report(f"{index + 1:064x}", producer=producer)
+            for index, producer in enumerate(profiles.RUNTIME_SCRIPT_PROFILES)
+        }
+        with (
+            patch.object(
+                identity_collector,
+                "collect_fixed_leaf_identity_reports",
+                return_value=reports,
+            ) as collect,
+            patch.object(result_verify, "verify_receipt", return_value={"producer": PRODUCER}),
+        ):
+            result_report = cache_cli.ensure_all(self.root)
+        self.assertFalse(result_report["recovered"])
+        self.assertEqual(collect.call_count, 2)
+
+    def test_ensure_all_recovers_only_invalid_leaf_then_revalidates_batch(self) -> None:
+        reports = {
+            producer: identity_report(f"{index + 1:064x}", producer=producer)
+            for index, producer in enumerate(profiles.RUNTIME_SCRIPT_PROFILES)
+        }
+        invalid = min(profiles.RUNTIME_SCRIPT_PROFILES)
+        validation = {
+            "schema": "krr-runtime-script-validation-v1",
+            "producer": invalid,
+            "valid": True,
+        }
+        with (
+            patch.object(
+                identity_collector,
+                "collect_fixed_leaf_identity_reports",
+                return_value=reports,
+            ) as collect,
+            patch.object(
+                cache_cli,
+                "_validate_report",
+                side_effect=[result.RuntimeScriptResultError("stale")]
+                + [validation] * (len(reports) - 1)
+                + [validation] * (2 * len(reports)),
+            ),
+            patch.object(cache_cli, "run_current", return_value={"producer": invalid}) as run,
+        ):
+            result_report = cache_cli.ensure_all(self.root)
+        self.assertTrue(result_report["recovered"])
+        self.assertEqual(run.call_args.args, (self.root, invalid))
+        self.assertEqual(collect.call_count, 3)
+
+    def test_unavailable_collector_fails_closed_without_creating_anchor(self) -> None:
+        with patch.object(
+            identity_collector,
+            "collect_identity_report",
+            return_value=identity_report(cacheable=False),
+        ), self.assertRaisesRegex(result.RuntimeScriptResultError, "collector_unavailable"):
+            cache_cli.current_key(self.root)
+
+        anchor_dir = self.git_directory() / local_anchor.DIRECTORY_NAME
+        self.assertFalse(anchor_dir.exists())
+
+    def test_run_current_invalidates_anchor_when_identity_fields_change(self) -> None:
+        changed_fields = (
+            "sourceManifestSha256",
+            "sourceInputsSha256",
+            "recipeSha256",
+            "toolEnvironmentSha256",
+            "inputSha256",
+            "identitySha256",
+        )
+        run_identity = result.build_identity(PRODUCER, "e" * 64)
+
+        for field in changed_fields:
+            with self.subTest(field=field):
+                self.setUp()
+                after = identity_report(run_identity)
+                after[field] = "9" * 64
+                self.assert_run_current_rejects_identity_change(
+                    identity_report(run_identity), after, run_identity
+                )
+
+    def run_ensure_after_corrupt_receipt(
+        self, postverify_error: str | None
+    ) -> tuple[dict[str, object] | None, int, str | None]:
+        run_identity = result.build_identity(PRODUCER, "e" * 64)
+        postverify = (
+            result.RuntimeScriptResultError(postverify_error)
+            if postverify_error is not None
+            else {"producer": PRODUCER}
+        )
+        with (
+            patch.object(identity_collector, "collect_identity_report", return_value=identity_report(run_identity)),
+            patch.object(identity_collector, "collect_execution_snapshot", return_value=identity_report(run_identity)),
+            patch.object(recipe_reader, "read_runtime_script_recipe", return_value=self.recipe()),
+            patch.object(producer_runner, "run_runtime_script", side_effect=self.fake_run(run_identity)),
+            patch.object(
+                result_verify,
+                "verify_receipt",
+                side_effect=[result.RuntimeScriptResultError("corrupt receipt"), postverify],
+            ) as verify,
+        ):
+            try:
+                report = cache_cli.ensure_current(self.root)
+            except result.RuntimeScriptResultError as error:
+                return None, verify.call_count, str(error)
+        return report, verify.call_count, None
+
+    def test_ensure_recovers_corrupt_receipt_and_verifies_fresh_producer(self) -> None:
+        report, verify_count, error = self.run_ensure_after_corrupt_receipt(None)
+
+        self.assertIsNone(error)
+        if report is None:
+            self.fail("ensure did not recover the corrupt receipt")
+        self.assertTrue(report["valid"])
+        self.assertTrue(report["recovered"])
+        self.assertEqual(verify_count, 2)
+
+    def test_ensure_invalidates_fresh_anchor_when_postverify_fails(self) -> None:
+        report, verify_count, error = self.run_ensure_after_corrupt_receipt("fresh receipt rejected")
+
+        self.assertIsNone(report)
+        self.assertEqual(verify_count, 2)
+        self.assertEqual(error, "fresh receipt rejected")
+        anchor_dir = self.git_directory() / local_anchor.DIRECTORY_NAME
+        current = local_anchor._read(anchor_dir, PRODUCER)
+        self.assertIsNotNone(current)
+        self.assertEqual(current["state"] if current else None, "pending")
+
+
+if __name__ == "__main__":
+    unittest.main()

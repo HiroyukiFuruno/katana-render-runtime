@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from typing import TypedDict
 from unittest.mock import Mock
 
 
@@ -28,7 +29,49 @@ OLD_SKRIFA_ID = f"{REGISTRY}#skrifa@0.48.0"
 TARGET_SKRIFA_ID = f"{REGISTRY}#skrifa@0.44.0"
 
 
-def edge(name: str, package_id: str) -> dict[str, object]:
+class CargoDependencyKind(TypedDict):
+    kind: str | None
+    target: str | None
+
+
+class CargoMetadataEdge(TypedDict):
+    name: str
+    pkg: str
+    dep_kinds: list[CargoDependencyKind]
+
+
+class CargoPackageDependency(TypedDict):
+    name: str
+    source: str | None
+    req: str
+    kind: str | None
+    optional: bool
+
+
+class CargoPackage(TypedDict):
+    id: str
+    name: str
+    version: str
+    source: str | None
+    dependencies: list[CargoPackageDependency]
+
+
+class CargoResolveNode(TypedDict):
+    id: str
+    deps: list[CargoMetadataEdge]
+
+
+class CargoResolve(TypedDict):
+    nodes: list[CargoResolveNode]
+
+
+class CargoMetadata(TypedDict):
+    packages: list[CargoPackage]
+    workspace_members: list[str]
+    resolve: CargoResolve
+
+
+def edge(name: str, package_id: str) -> CargoMetadataEdge:
     return {
         "name": name,
         "pkg": package_id,
@@ -36,7 +79,9 @@ def edge(name: str, package_id: str) -> dict[str, object]:
     }
 
 
-def dependency(name: str, requirement: str, source: str | None, kind: str | None = None) -> dict[str, object]:
+def dependency(
+    name: str, requirement: str, source: str | None, kind: str | None = None
+) -> CargoPackageDependency:
     return {
         "name": name,
         "source": source,
@@ -46,12 +91,20 @@ def dependency(name: str, requirement: str, source: str | None, kind: str | None
     }
 
 
-def metadata(direct_id: str = TARGET_SKRIFA_ID, direct_req: str = "^0.44") -> dict[str, object]:
+def metadata(
+    direct_id: str = TARGET_SKRIFA_ID,
+    direct_req: str = "^0.44",
+    resvg_name: str = "resvg",
+    usvg_name: str = "usvg",
+    include_decoy: bool = False,
+) -> CargoMetadata:
+    resvg_id = f"{REGISTRY}#{resvg_name}@0.48.1"
+    usvg_id = f"{REGISTRY}#{usvg_name}@0.48.1"
     versions = {
         OLD_SKRIFA_ID: "0.48.0",
         TARGET_SKRIFA_ID: "0.44.0",
     }
-    packages = [
+    packages: list[CargoPackage] = [
         {
             "id": RUNTIME_ID,
             "name": "katana-render-runtime",
@@ -60,42 +113,73 @@ def metadata(direct_id: str = TARGET_SKRIFA_ID, direct_req: str = "^0.44") -> di
             "dependencies": [dependency("skrifa", direct_req, REGISTRY)],
         },
         {
-            "id": RESVG_ID,
-            "name": "resvg",
+            "id": resvg_id,
+            "name": resvg_name,
             "version": "0.48.1",
             "source": REGISTRY,
             "dependencies": [],
         },
         {
-            "id": USVG_ID,
-            "name": "usvg",
+            "id": usvg_id,
+            "name": usvg_name,
             "version": "0.48.1",
             "source": REGISTRY,
             "dependencies": [dependency("skrifa", "^0.44", REGISTRY)],
         },
-        *[
-            {
-                "id": package_id,
-                "name": "skrifa",
-                "version": version,
-                "source": REGISTRY,
-                "dependencies": [],
-            }
-            for package_id, version in versions.items()
-        ],
     ]
+    packages.extend(
+        {
+            "id": package_id,
+            "name": "skrifa",
+            "version": version,
+            "source": REGISTRY,
+            "dependencies": [],
+        }
+        for package_id, version in versions.items()
+    )
+    runtime_deps: list[CargoMetadataEdge] = [
+        edge("resvg", resvg_id),
+        edge("skrifa", direct_id),
+    ]
+    nodes: list[CargoResolveNode] = [
+        {"id": RUNTIME_ID, "deps": runtime_deps},
+        {"id": resvg_id, "deps": [edge("usvg", usvg_id)]},
+        {"id": usvg_id, "deps": [edge("skrifa", TARGET_SKRIFA_ID)]},
+        {"id": OLD_SKRIFA_ID, "deps": []},
+        {"id": TARGET_SKRIFA_ID, "deps": []},
+    ]
+    if include_decoy:
+        helper_id = f"{REGISTRY}#metadata-helper@0.1.0"
+        decoy_id = f"{REGISTRY}#usvg@0.49.0"
+        packages.extend(
+            [
+                {
+                    "id": helper_id,
+                    "name": "metadata-helper",
+                    "version": "0.1.0",
+                    "source": REGISTRY,
+                    "dependencies": [],
+                },
+                {
+                    "id": decoy_id,
+                    "name": "usvg",
+                    "version": "0.49.0",
+                    "source": REGISTRY,
+                    "dependencies": [],
+                },
+            ]
+        )
+        runtime_deps.append(edge("metadata-helper", helper_id))
+        nodes.extend(
+            [
+                {"id": helper_id, "deps": [edge("usvg", decoy_id)]},
+                {"id": decoy_id, "deps": []},
+            ]
+        )
     return {
         "packages": packages,
         "workspace_members": [RUNTIME_ID],
-        "resolve": {
-            "nodes": [
-                {"id": RUNTIME_ID, "deps": [edge("resvg", RESVG_ID), edge("skrifa", direct_id)]},
-                {"id": RESVG_ID, "deps": [edge("usvg", USVG_ID)]},
-                {"id": USVG_ID, "deps": [edge("skrifa", TARGET_SKRIFA_ID)]},
-                {"id": OLD_SKRIFA_ID, "deps": []},
-                {"id": TARGET_SKRIFA_ID, "deps": []},
-            ]
-        },
+        "resolve": {"nodes": nodes},
     }
 
 
@@ -128,11 +212,34 @@ class UpdateUsvgSkrifaPairTest(unittest.TestCase):
         self.assertEqual(runtime["id"], RUNTIME_ID)
         self.assertEqual(selected["id"], USVG_ID)
 
+    def test_selects_fork_packages_through_logical_edges_with_public_decoy(self) -> None:
+        graph = metadata(
+            resvg_name="katana-resvg",
+            usvg_name="katana-usvg",
+            include_decoy=True,
+        )
+        _, _, selected, _ = MODULE.select_usvg_package(graph)
+        self.assertEqual(selected["name"], "katana-usvg")
+
+    def test_reachable_dangling_dependency_fails_closed(self) -> None:
+        graph = metadata()
+        graph["resolve"]["nodes"][0]["deps"].append(edge("broken", "missing-package"))
+        with self.assertRaisesRegex(ValueError, "missing package node"):
+            MODULE.select_usvg_package(graph)
+
     def test_ambiguous_usvg_resolution_fails_closed(self) -> None:
         graph = metadata()
         packages = graph["packages"]
         nodes = graph["resolve"]["nodes"]
-        packages.append({"id": f"{REGISTRY}#usvg@0.49.0", "name": "usvg", "source": REGISTRY})
+        packages.append(
+            {
+                "id": f"{REGISTRY}#usvg@0.49.0",
+                "name": "usvg",
+                "version": "0.49.0",
+                "source": REGISTRY,
+                "dependencies": [],
+            }
+        )
         nodes.append({"id": f"{REGISTRY}#usvg@0.49.0", "deps": []})
         nodes[1]["deps"].append(edge("usvg", f"{REGISTRY}#usvg@0.49.0"))
         with self.assertRaisesRegex(ValueError, "expected one resolved usvg"):
@@ -179,26 +286,41 @@ class UpdateUsvgSkrifaPairTest(unittest.TestCase):
         self.assertEqual(runner.call_count, 2)
         self.assertTrue(all("update" not in call.args[0] for call in runner.call_args_list))
 
-    def test_depends_update_all_orders_usvg_pair_after_lock_update_and_before_bun(self) -> None:
+    def test_depends_update_all_orders_inline_svg_boundary_before_bun(self) -> None:
         justfile = (ROOT / "Justfile").read_text(encoding="utf-8")
-        recipe = justfile.split("depends-update-all:\n", maxsplit=1)[1].split("\n\n", maxsplit=1)[0]
+        recipe = justfile.split("depends-update-mutations:\n", maxsplit=1)[1].split("\n\n", maxsplit=1)[0]
         commands = [line.strip() for line in recipe.splitlines() if line.strip()]
-        broad_upgrade = "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa"
+        broad_upgrade = "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa --exclude harfrust --exclude skia-safe --exclude katana-ast-lint"
         html_pair = "python3 scripts/release/update_html5ever_pair.py --cargo \"{{CARGO}}\""
         lock_update = "{{CARGO}} update"
-        skrifa_pair = "python3 scripts/release/update_usvg_skrifa_pair.py --cargo \"{{CARGO}}\""
-        bun_update_index = next(index for index, line in enumerate(commands) if line.startswith("bun update"))
+        harness_lock = "python3 scripts/release/update_html_performance_harness_lock.py --cargo \"{{CARGO}}\""
+        bun_update = "bun update --latest '!@moonrepo/*'"
+        biome_migrate = "bunx --no-install biome migrate --write"
 
-        for command in (broad_upgrade, html_pair, lock_update, skrifa_pair):
+        for command in (
+            broad_upgrade,
+            html_pair,
+            lock_update,
+            harness_lock,
+            bun_update,
+            biome_migrate,
+        ):
             self.assertEqual(commands.count(command), 1, f"expected one {command!r}")
+        self.assertNotIn(
+            "python3 scripts/release/update_usvg_skrifa_pair.py --cargo \"{{CARGO}}\"",
+            commands,
+        )
         broad_index = commands.index(broad_upgrade)
         html_index = commands.index(html_pair)
         lock_index = commands.index(lock_update)
-        skrifa_index = commands.index(skrifa_pair)
+        harness_index = commands.index(harness_lock)
+        bun_update_index = commands.index(bun_update)
+        biome_index = commands.index(biome_migrate)
         self.assertLess(broad_index, html_index)
         self.assertLess(html_index, lock_index)
-        self.assertLess(lock_index, skrifa_index)
-        self.assertLess(skrifa_index, bun_update_index)
+        self.assertLess(lock_index, harness_index)
+        self.assertLess(harness_index, bun_update_index)
+        self.assertLess(bun_update_index, biome_index)
 
 
 if __name__ == "__main__":

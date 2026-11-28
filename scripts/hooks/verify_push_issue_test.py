@@ -11,43 +11,49 @@ import sys
 import tempfile
 import tomllib
 import unittest
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parents[1]))
 
+from git_fixture_environment import GIT_FIXTURE_ENVIRONMENT, isolate_git_fixture_environment
 import verify_push_issue as subject
 
 
 class VerifyPushIssueTest(unittest.TestCase):
-    _GIT_FIXTURE_ENVIRONMENT = (
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_COMMON_DIR",
-        "GIT_INDEX_FILE",
-        "GIT_OBJECT_DIRECTORY",
-        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        "GIT_CEILING_DIRECTORIES",
-        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
-        "GIT_PREFIX",
-    )
+    _GIT_FIXTURE_ENVIRONMENT = GIT_FIXTURE_ENVIRONMENT
 
     def setUp(self) -> None:
         """Keep temporary Git fixtures outside a caller's hook repository."""
-        saved = {
-            name: os.environ[name]
-            for name in self._GIT_FIXTURE_ENVIRONMENT
-            if name in os.environ
-        }
-        for name in self._GIT_FIXTURE_ENVIRONMENT:
-            os.environ.pop(name, None)
+        isolate_git_fixture_environment(self)
 
-        def restore() -> None:
-            for name in self._GIT_FIXTURE_ENVIRONMENT:
-                os.environ.pop(name, None)
-            os.environ.update(saved)
+    def test_git_fixture_environment_helper_restores_exact_original_state(self) -> None:
+        expected_names = (
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_COMMON_DIR",
+            "GIT_INDEX_FILE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_CEILING_DIRECTORIES",
+            "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+            "GIT_PREFIX",
+        )
+        self.assertEqual(GIT_FIXTURE_ENVIRONMENT, expected_names)
+        original = {"GIT_DIR": "original-dir", "GIT_PREFIX": "original-prefix"}
+        with patch.dict(os.environ, original, clear=True):
+            before = dict(os.environ)
+            test_case = unittest.TestCase()
+            isolate_git_fixture_environment(test_case)
+            self.assertTrue(all(name not in os.environ for name in expected_names))
+            os.environ["GIT_DIR"] = "mutated-dir"
+            os.environ["GIT_WORK_TREE"] = "introduced-work-tree"
 
-        self.addCleanup(restore)
+            test_case.doCleanups()
+
+            self.assertEqual(os.environ, before)
 
     def test_temporary_git_fixtures_do_not_inherit_hook_repository_state(self) -> None:
         self.assertTrue(
@@ -91,6 +97,68 @@ class VerifyPushIssueTest(unittest.TestCase):
             text=True,
         )
 
+    def prepare_local_history_repository(
+        self,
+        repository: Path,
+        *,
+        initial_branch: str | None = None,
+        baseline_files: tuple[tuple[str, str], ...] = (("README.md", "baseline\n"),),
+    ) -> str:
+        """Create the shared local-Git baseline used by provenance tests."""
+        init_arguments = ["git", "init", "-q"]
+        if initial_branch is not None:
+            init_arguments.extend(["--initial-branch", initial_branch])
+        subprocess.run(init_arguments, cwd=repository, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
+        subprocess.run(["git", "config", "user.name", "Hook test"], cwd=repository, check=True)
+        for relative_path, contents in baseline_files:
+            path = repository / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(contents, encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=repository, check=True)
+        subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repository, check=True)
+        return subject._run_git(repository, "rev-parse", "HEAD")
+
+    @staticmethod
+    def local_fixture_git(repository: Path) -> Callable[..., str]:
+        def git(*arguments: str) -> str:
+            return subject._run_git(repository, *arguments)
+
+        return git
+
+    def assert_renamed_closed_reference_rejected(
+        self,
+        *,
+        issue_commit: str,
+        net_paths: list[str],
+        commit_paths: Callable[[str], Sequence[str]],
+        commit_surviving_paths: Callable[[str, Sequence[str]], Sequence[str]],
+    ) -> None:
+        with self.assertRaisesRegex(subject.ContractViolation, "rename先"):
+            self.effective_issues_for_closed_reference(
+                issue_commit=issue_commit,
+                net_paths=net_paths,
+                commit_paths=commit_paths,
+                commit_surviving_paths=commit_surviving_paths,
+            )
+
+    def effective_issues_for_closed_reference(
+        self,
+        *,
+        issue_commit: str,
+        net_paths: Sequence[str],
+        commit_paths: Callable[[str], Sequence[str]],
+        commit_surviving_paths: Callable[[str, Sequence[str]], Sequence[str]],
+    ) -> set[int]:
+        return subject._effective_release_issue_numbers(
+            repository="HiroyukiFuruno/katana-render-runtime",
+            references_by_commit=[(issue_commit, {64})],
+            net_paths=net_paths,
+            issue_loader=lambda number: self.issue(number, state="CLOSED"),
+            commit_paths=commit_paths,
+            commit_surviving_paths=commit_surviving_paths,
+        )
+
     @staticmethod
     def install_fake_push_remote_git(binary_directory: Path) -> None:
         """Emulate direct GitHub transport while preserving the configured URL."""
@@ -120,6 +188,134 @@ class VerifyPushIssueTest(unittest.TestCase):
             encoding="utf-8",
         )
         fake_git.chmod(fake_git.stat().st_mode | stat.S_IXUSR)
+
+    def create_topic_push_fixture(
+        self,
+        repository: Path,
+        binary_directory: Path,
+    ) -> tuple[str, dict[str, str]]:
+        """Create the common topic branch and fake Git transport for CLI tests."""
+        git, _, environment = self.prepare_cli_repository(
+            repository,
+            binary_directory,
+            remote_push_urls=(
+                (
+                    "origin",
+                    "https://github.com/HiroyukiFuruno/katana-render-runtime.git",
+                ),
+            ),
+            tracking_remote="origin",
+        )
+        topic_sha = self.create_cli_topic(
+            repository,
+            git,
+            branch="topic",
+            commit_arguments=("-m", "feat: missing Issue reference"),
+        )
+        return topic_sha, environment
+
+    def prepare_cli_repository(
+        self,
+        repository: Path,
+        binary_directory: Path,
+        *,
+        remote_push_urls: tuple[tuple[str, str], ...],
+        tracking_remote: str,
+    ) -> tuple[Callable[..., str], str, dict[str, str]]:
+        """Build a local base branch with fixture remotes and transport."""
+        repository.mkdir(parents=True, exist_ok=True)
+        binary_directory.mkdir(parents=True, exist_ok=True)
+
+        def git(*arguments: str) -> str:
+            result = subprocess.run(
+                ["git", *arguments],
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return result.stdout.strip()
+
+        git("init", "--initial-branch=master")
+        git("config", "user.name", "Issue Contract Test")
+        git("config", "user.email", "issue@example.com")
+        (repository / "base.txt").write_text("base\n", encoding="utf-8")
+        git("add", "base.txt")
+        git("commit", "-m", "initial")
+        base_sha = git("rev-parse", "HEAD")
+        for remote, push_url in remote_push_urls:
+            self.configure_live_fetch_remote(
+                repository,
+                remote=remote,
+                push_url=push_url,
+            )
+            tracking_ref = f"refs/remotes/{remote}/master"
+            git("update-ref", tracking_ref, base_sha)
+            git("symbolic-ref", f"refs/remotes/{remote}/HEAD", tracking_ref)
+        self.install_fake_push_remote_git(binary_directory)
+        environment = os.environ.copy()
+        environment["PATH"] = f"{binary_directory}:{environment['PATH']}"
+        real_git = shutil.which("git")
+        if real_git is None:
+            raise RuntimeError("git executable is required for this fixture")
+        environment["KRR_TEST_REAL_GIT"] = real_git
+        environment["KRR_TEST_PUSH_REMOTE_REF"] = f"refs/remotes/{tracking_remote}/master"
+        return git, base_sha, environment
+
+    @staticmethod
+    def create_cli_topic(
+        repository: Path,
+        git: Callable[..., str],
+        *,
+        branch: str,
+        filename: str = "topic.txt",
+        commit_arguments: tuple[str, ...],
+    ) -> str:
+        git("switch", "-c", branch)
+        (repository / filename).write_text("topic\n", encoding="utf-8")
+        git("add", filename)
+        git("commit", *commit_arguments)
+        return git("rev-parse", "HEAD")
+
+    @staticmethod
+    def install_fake_open_issue_gh(
+        binary_directory: Path,
+        *,
+        expected_repository: str | None = None,
+    ) -> None:
+        repository_check = (
+            f'test "$5" = "{expected_repository}" || exit 21\n'
+            if expected_repository is not None
+            else ""
+        )
+        fake_gh = binary_directory / "gh"
+        fake_gh.write_text(
+            "#!/bin/sh\n"
+            f"{repository_check}"
+            "printf '%s\\n' "
+            "'{\"number\":64,\"state\":\"OPEN\",\"body\":\"Issue body\","
+            "\"url\":\"https://github.com/HiroyukiFuruno/katana-render-runtime/issues/64\"}'\n",
+            encoding="utf-8",
+        )
+        fake_gh.chmod(fake_gh.stat().st_mode | stat.S_IXUSR)
+
+    def run_cli_with_push_input(
+        self,
+        repository: Path,
+        environment: dict[str, str],
+        push_input: str | None = None,
+        *,
+        arguments: tuple[str, ...] = (),
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(Path(subject.__file__)), *arguments],
+            cwd=repository,
+            env=environment,
+            input=push_input,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
     def test_read_push_input_does_not_wait_on_an_interactive_terminal(self) -> None:
         class InteractiveInput(io.StringIO):
@@ -214,7 +410,7 @@ class VerifyPushIssueTest(unittest.TestCase):
             "",
             f"{('a' * 40)}\tHEAD\n",
             f"ref: refs/tags/v1\tHEAD\n{('a' * 40)}\tHEAD\n",
-            f"ref: refs/heads/main\tHEAD\nnot-a-sha\tHEAD\n",
+            "ref: refs/heads/main\tHEAD\nnot-a-sha\tHEAD\n",
             f"ref: refs/heads/main\tHEAD\n{('a' * 40)}\tHEAD\nextra\n",
         )
         for raw in malformed_responses:
@@ -357,7 +553,7 @@ class VerifyPushIssueTest(unittest.TestCase):
             stdout=f"stdout includes {credential_url}",
             stderr=f"stderr includes {credential_url}",
         )
-        with patch.object(subject.subprocess, "run", return_value=completed):
+        with patch.object(subprocess, "run", return_value=completed):
             with self.assertRaises(subject.ContractViolation) as captured:
                 subject._live_remote_default_head(Path("/tmp/repository"), credential_url)
         message = str(captured.exception)
@@ -365,7 +561,7 @@ class VerifyPushIssueTest(unittest.TestCase):
         self.assertNotIn("top-secret", message)
         self.assertNotIn("example.invalid", message)
 
-        with patch.object(subject.subprocess, "run", return_value=completed):
+        with patch.object(subprocess, "run", return_value=completed):
             with self.assertRaises(subject.ContractViolation) as captured:
                 subject._run_remote_git(
                     Path("/tmp/repository"),
@@ -972,14 +1168,11 @@ class VerifyPushIssueTest(unittest.TestCase):
     def test_local_commit_path_proof_uses_real_git_history(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
-            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
-            subprocess.run(["git", "config", "user.name", "Hook test"], cwd=repository, check=True)
             old_path = repository / "old" / "obsolete.yml"
-            old_path.parent.mkdir()
-            old_path.write_text("baseline\n", encoding="utf-8")
-            subprocess.run(["git", "add", "."], cwd=repository, check=True)
-            subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repository, check=True)
+            self.prepare_local_history_repository(
+                repository,
+                baseline_files=(("old/obsolete.yml", "baseline\n"),),
+            )
             old_path.write_text("obsolete change\n", encoding="utf-8")
             subprocess.run(["git", "add", "."], cwd=repository, check=True)
             subprocess.run(["git", "commit", "-qm", "old governance\n\nRefs #64"], cwd=repository, check=True)
@@ -1010,13 +1203,10 @@ class VerifyPushIssueTest(unittest.TestCase):
     def test_replace_ref_cannot_hide_closed_issue_provenance_or_ancestor_range(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            subprocess.run(["git", "init", "-q", "--initial-branch=main"], cwd=repository, check=True)
-            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
-            subprocess.run(["git", "config", "user.name", "Hook test"], cwd=repository, check=True)
-            (repository / "README.md").write_text("baseline\n", encoding="utf-8")
-            subprocess.run(["git", "add", "."], cwd=repository, check=True)
-            subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repository, check=True)
-            baseline = subject._run_git(repository, "rev-parse", "HEAD")
+            baseline = self.prepare_local_history_repository(
+                repository,
+                initial_branch="main",
+            )
 
             obsolete_path = repository / "old" / "closed-issue.rs"
             obsolete_path.parent.mkdir()
@@ -1049,13 +1239,7 @@ class VerifyPushIssueTest(unittest.TestCase):
     def test_closed_reference_rejects_issue_content_renamed_to_current_net_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
-            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
-            subprocess.run(["git", "config", "user.name", "Hook test"], cwd=repository, check=True)
-            (repository / "README.md").write_text("baseline\n", encoding="utf-8")
-            subprocess.run(["git", "add", "."], cwd=repository, check=True)
-            subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repository, check=True)
-            baseline = subject._run_git(repository, "rev-parse", "HEAD")
+            baseline = self.prepare_local_history_repository(repository)
             old_path = repository / "old" / "name.rs"
             old_path.parent.mkdir()
             old_path.write_text("surviving issue content\n", encoding="utf-8")
@@ -1089,28 +1273,22 @@ class VerifyPushIssueTest(unittest.TestCase):
                 repository, issue_commit, head, ["old/name.rs"], edge_cache
             )
             self.assertEqual(surviving_paths, ["new/name.rs"])
-            with self.assertRaisesRegex(subject.ContractViolation, "rename先"):
-                subject._effective_release_issue_numbers(
-                    repository="HiroyukiFuruno/katana-render-runtime",
-                    references_by_commit=[(issue_commit, {64})],
-                    net_paths=net_paths,
-                    issue_loader=lambda number: self.issue(number, state="CLOSED"),
-                    commit_paths=lambda sha: subject._local_commit_paths(repository, sha),
-                    commit_surviving_paths=lambda sha, paths: subject._local_surviving_paths_at_head(
-                        repository, sha, head, paths, edge_cache
-                    ),
-                )
+            self.assert_renamed_closed_reference_rejected(
+                issue_commit=issue_commit,
+                net_paths=net_paths,
+                commit_paths=lambda sha: subject._local_commit_paths(repository, sha),
+                commit_surviving_paths=lambda sha, paths: subject._local_surviving_paths_at_head(
+                    repository, sha, head, paths, edge_cache
+                ),
+            )
 
     def test_local_second_parent_rename_survives_merge_and_remains_active(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            subprocess.run(["git", "init", "-q", "--initial-branch=main"], cwd=repository, check=True)
-            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
-            subprocess.run(["git", "config", "user.name", "Hook test"], cwd=repository, check=True)
-            (repository / "README.md").write_text("baseline\n", encoding="utf-8")
-            subprocess.run(["git", "add", "."], cwd=repository, check=True)
-            subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repository, check=True)
-            baseline = subject._run_git(repository, "rev-parse", "HEAD")
+            baseline = self.prepare_local_history_repository(
+                repository,
+                initial_branch="main",
+            )
             old_path = repository / "old" / "name.rs"
             old_path.parent.mkdir()
             old_path.write_text("surviving issue content\n", encoding="utf-8")
@@ -1151,15 +1329,13 @@ class VerifyPushIssueTest(unittest.TestCase):
     def test_local_renamed_closed_reference_is_obsolete_after_surviving_path_deletion(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
-            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
-            subprocess.run(["git", "config", "user.name", "Hook test"], cwd=repository, check=True)
-            (repository / "README.md").write_text("baseline\n", encoding="utf-8")
-            (repository / "src").mkdir()
-            (repository / "src" / "active.rs").write_text("baseline active\n", encoding="utf-8")
-            subprocess.run(["git", "add", "."], cwd=repository, check=True)
-            subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repository, check=True)
-            baseline = subject._run_git(repository, "rev-parse", "HEAD")
+            baseline = self.prepare_local_history_repository(
+                repository,
+                baseline_files=(
+                    ("README.md", "baseline\n"),
+                    ("src/active.rs", "baseline active\n"),
+                ),
+            )
             old_path = repository / "old" / "name.rs"
             old_path.parent.mkdir()
             old_path.write_text("obsolete governance content\n", encoding="utf-8")
@@ -1189,11 +1365,9 @@ class VerifyPushIssueTest(unittest.TestCase):
             )
             self.assertEqual(net_paths, ["src/active.rs"])
             edge_cache: dict[tuple[str, str], tuple[tuple[str, tuple[str, ...]], ...]] = {}
-            result = subject._effective_release_issue_numbers(
-                repository="HiroyukiFuruno/katana-render-runtime",
-                references_by_commit=[(issue_commit, {64})],
+            result = self.effective_issues_for_closed_reference(
+                issue_commit=issue_commit,
                 net_paths=net_paths,
-                issue_loader=lambda number: self.issue(number, state="CLOSED"),
                 commit_paths=lambda sha: subject._local_commit_paths(repository, sha),
                 commit_surviving_paths=lambda sha, paths: subject._local_surviving_paths_at_head(
                     repository, sha, head, paths, edge_cache
@@ -1204,13 +1378,7 @@ class VerifyPushIssueTest(unittest.TestCase):
     def test_local_same_commit_heavy_move_rewrite_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
-            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
-            subprocess.run(["git", "config", "user.name", "Hook test"], cwd=repository, check=True)
-            (repository / "README.md").write_text("baseline\n", encoding="utf-8")
-            subprocess.run(["git", "add", "."], cwd=repository, check=True)
-            subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repository, check=True)
-            baseline = subject._run_git(repository, "rev-parse", "HEAD")
+            baseline = self.prepare_local_history_repository(repository)
             old_path = repository / "old" / "name.rs"
             old_path.parent.mkdir()
             old_path.write_text("".join(f"old unique line {index}\n" for index in range(20)), encoding="utf-8")
@@ -1234,11 +1402,9 @@ class VerifyPushIssueTest(unittest.TestCase):
                 {("D", ("old/name.rs",)), ("A", ("new/name.rs",))},
             )
             with self.assertRaisesRegex(subject.ContractViolation, "削除と同一edgeの追加"):
-                subject._effective_release_issue_numbers(
-                    repository="HiroyukiFuruno/katana-render-runtime",
-                    references_by_commit=[(issue_commit, {64})],
+                self.effective_issues_for_closed_reference(
+                    issue_commit=issue_commit,
                     net_paths=net_paths,
-                    issue_loader=lambda number: self.issue(number, state="CLOSED"),
                     commit_paths=lambda sha: subject._local_commit_paths(repository, sha),
                     commit_surviving_paths=lambda sha, paths: subject._local_surviving_paths_at_head(
                         repository, sha, head, paths, edge_cache
@@ -1246,7 +1412,10 @@ class VerifyPushIssueTest(unittest.TestCase):
                 )
 
     @staticmethod
-    def remote_git_history(repository: Path, calls: list[str]):
+    def remote_git_history(
+        repository: Path,
+        calls: list[str],
+    ) -> Callable[[str], object]:
         """実Gitのimmutable objectをGitHubのcommit/tree/compare形式で返す。"""
         def gh_json(endpoint: str) -> object:
             calls.append(endpoint)
@@ -1291,16 +1460,13 @@ class VerifyPushIssueTest(unittest.TestCase):
     def assert_added_copy_then_source_deletion_retains_closed_provenance(self, *, edited_copy: bool) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            def git(*arguments: str) -> str:
-                return subject._run_git(repository, *arguments)
-            git("init", "-q", "--initial-branch=main")
-            git("config", "user.email", "test@example.com")
-            git("config", "user.name", "Hook test")
+            git = self.local_fixture_git(repository)
             original = "".join(f"closed issue implementation line {index}\n" for index in range(100))
-            (repository / "old.rs").write_text(original, encoding="utf-8")
-            git("add", ".")
-            git("commit", "-qm", "source")
-            source = git("rev-parse", "HEAD")
+            source = self.prepare_local_history_repository(
+                repository,
+                initial_branch="main",
+                baseline_files=(("old.rs", original),),
+            )
             shutil.copyfile(repository / "old.rs", repository / "copied.rs")
             (repository / "copied.rs").chmod(0o755)
             if edited_copy:
@@ -1320,28 +1486,25 @@ class VerifyPushIssueTest(unittest.TestCase):
                 remote = subject._pr_surviving_paths_at_head("owner/repo", source, head, ["old.rs"], {})
             self.assertEqual(local, ["copied.rs"])
             self.assertEqual(remote, local)
-            with self.assertRaisesRegex(subject.ContractViolation, "rename先"):
-                subject._effective_release_issue_numbers(
-                    repository="HiroyukiFuruno/katana-render-runtime",
-                    references_by_commit=[(source, {64})], net_paths=["copied.rs"],
-                    issue_loader=lambda number: self.issue(number, state="CLOSED"),
-                    commit_paths=lambda _sha: ["old.rs"],
-                    commit_surviving_paths=lambda _sha, _paths: remote,
-                )
+            self.assert_renamed_closed_reference_rejected(
+                issue_commit=source,
+                net_paths=["copied.rs"],
+                commit_paths=lambda _sha: ["old.rs"],
+                commit_surviving_paths=lambda _sha, _paths: remote,
+            )
 
     def test_merge_independent_addition_and_retired_paths_have_local_remote_parity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            def git(*arguments: str) -> str:
-                return subject._run_git(repository, *arguments)
-            git("init", "-q", "--initial-branch=main")
-            git("config", "user.email", "test@example.com")
-            git("config", "user.name", "Hook test")
-            (repository / "old.rs").write_text("retired closed issue implementation\n", encoding="utf-8")
-            (repository / "README.md").write_text("baseline\n", encoding="utf-8")
-            git("add", ".")
-            git("commit", "-qm", "source")
-            source = git("rev-parse", "HEAD")
+            git = self.local_fixture_git(repository)
+            source = self.prepare_local_history_repository(
+                repository,
+                initial_branch="main",
+                baseline_files=(
+                    ("old.rs", "retired closed issue implementation\n"),
+                    ("README.md", "baseline\n"),
+                ),
+            )
             git("switch", "-qc", "retired")
             git("rm", "old.rs")
             git("commit", "-qm", "retire source")
@@ -1363,11 +1526,15 @@ class VerifyPushIssueTest(unittest.TestCase):
             self.assertIn(("D", ("old.rs",)), records)
             self.assertIn(("A", ("drawio.br",)), records)
             self.assertGreaterEqual(len(records), 300)
-            local_edges = {}
+            local_edges: dict[
+                tuple[str, str], tuple[tuple[str, tuple[str, ...]], ...]
+            ] = {}
             local = subject._local_surviving_paths_at_head(repository, source, head, ["old.rs"], local_edges)
             self.assertEqual(local, [])
             self.assertNotIn((retired, added), local_edges)
-            remote_edges = {}
+            remote_edges: dict[
+                tuple[str, str], tuple[tuple[str, tuple[str, ...]], ...]
+            ] = {}
             calls: list[str] = []
             with patch.object(subject, "_gh_json", side_effect=self.remote_git_history(repository, calls)):
                 remote = subject._pr_surviving_paths_at_head("owner/repo", source, head, ["old.rs"], remote_edges)
@@ -1408,15 +1575,12 @@ class VerifyPushIssueTest(unittest.TestCase):
     def test_deleted_state_skips_large_edge_after_full_commit_dag_validation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            def git(*arguments: str) -> str:
-                return subject._run_git(repository, *arguments)
-            git("init", "-q", "--initial-branch=main")
-            git("config", "user.email", "test@example.com")
-            git("config", "user.name", "Hook test")
-            (repository / "old.rs").write_text("obsolete implementation\n", encoding="utf-8")
-            git("add", ".")
-            git("commit", "-qm", "source")
-            source = git("rev-parse", "HEAD")
+            git = self.local_fixture_git(repository)
+            source = self.prepare_local_history_repository(
+                repository,
+                initial_branch="main",
+                baseline_files=(("old.rs", "obsolete implementation\n"),),
+            )
             git("rm", "old.rs")
             git("commit", "-qm", "retire source")
             retired = git("rev-parse", "HEAD")
@@ -1460,7 +1624,7 @@ class VerifyPushIssueTest(unittest.TestCase):
         data = b"immutable source\n"
         sha = hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
         valid = {"sha": sha, "size": len(data), "encoding": "base64", "content": base64.b64encode(data).decode()}
-        cache = {}
+        cache: dict[str, bytes] = {}
         with patch.object(subject, "_gh_json", return_value=valid) as loader:
             self.assertEqual(subject._pr_blob_bytes("owner/repo", sha, cache), data)
             self.assertEqual(subject._pr_blob_bytes("owner/repo", sha, cache), data)
@@ -1553,15 +1717,12 @@ class VerifyPushIssueTest(unittest.TestCase):
                 {},
             )
         self.assertEqual(surviving_paths, ["new/name.rs"])
-        with self.assertRaisesRegex(subject.ContractViolation, "rename先"):
-            subject._effective_release_issue_numbers(
-                repository=repository,
-                references_by_commit=[(issue_commit, {64})],
-                net_paths=["new/name.rs"],
-                issue_loader=lambda number: self.issue(number, state="CLOSED"),
-                commit_paths=lambda _sha: ["old/name.rs"],
-                commit_surviving_paths=lambda _sha, _paths: surviving_paths,
-            )
+        self.assert_renamed_closed_reference_rejected(
+            issue_commit=issue_commit,
+            net_paths=["new/name.rs"],
+            commit_paths=lambda _sha: ["old/name.rs"],
+            commit_surviving_paths=lambda _sha, _paths: surviving_paths,
+        )
 
     def test_remote_rename_provenance_traces_both_merge_parents_and_later_edits(self) -> None:
         repository = "HiroyukiFuruno/katana-render-runtime"
@@ -1612,17 +1773,14 @@ class VerifyPushIssueTest(unittest.TestCase):
 
         edge_cache: dict[tuple[str, str], tuple[tuple[str, tuple[str, ...]], ...]] = {}
         with patch.object(subject, "_gh_json", side_effect=gh_json):
-            with self.assertRaisesRegex(subject.ContractViolation, "rename先"):
-                subject._effective_release_issue_numbers(
-                    repository=repository,
-                    references_by_commit=[(source, {64})],
-                    net_paths=["new/name.rs"],
-                    issue_loader=lambda number: self.issue(number, state="CLOSED"),
-                    commit_paths=lambda _sha: ["old/name.rs"],
-                    commit_surviving_paths=lambda sha, paths: subject._pr_surviving_paths_at_head(
-                        repository, sha, head, paths, edge_cache
-                    ),
-                )
+            self.assert_renamed_closed_reference_rejected(
+                issue_commit=source,
+                net_paths=["new/name.rs"],
+                commit_paths=lambda _sha: ["old/name.rs"],
+                commit_surviving_paths=lambda sha, paths: subject._pr_surviving_paths_at_head(
+                    repository, sha, head, paths, edge_cache
+                ),
+            )
         self.assertIn((merge, head), edge_cache)
         self.assertEqual(len(edge_cache), len(edge_files))
 
@@ -1665,14 +1823,21 @@ class VerifyPushIssueTest(unittest.TestCase):
 
     def test_closed_release_reference_fails_closed_on_missing_or_truncated_provenance(self) -> None:
         closed = self.issue(64, state="CLOSED")
-        for paths in ([],):
+        path_cases: tuple[list[str], ...] = ([],)
+        for paths in path_cases:
             with self.subTest(paths=paths), self.assertRaisesRegex(subject.ContractViolation, "証跡不足"):
+                def commit_paths(
+                    _sha: str,
+                    paths: list[str] = paths,
+                ) -> list[str]:
+                    return paths
+
                 subject._effective_release_issue_numbers(
                     repository="HiroyukiFuruno/katana-render-runtime",
                     references_by_commit=[("a" * 40, {64})],
                     net_paths=["src/current.rs"],
                     issue_loader=lambda _number: closed,
-                    commit_paths=lambda _sha: paths,
+                    commit_paths=commit_paths,
                     commit_surviving_paths=lambda _sha, _paths: [],
                 )
         with self.assertRaisesRegex(subject.ContractViolation, "provenance incomplete"):
@@ -1748,7 +1913,7 @@ class VerifyPushIssueTest(unittest.TestCase):
             ("API migration", "API移行", "no migration required"),
             ("Verification", "検証証跡", "just check passed"),
         )
-        for index, (label, expected_error, value) in enumerate(fields):
+        for index, (label, expected_error, _value) in enumerate(fields):
             for placeholder in ("N/A", "n/a", "NA", "n.a.", "none", "TBD"):
                 with self.subTest(label=label, placeholder=placeholder):
                     rendered = list(fields)
@@ -2343,6 +2508,13 @@ class VerifyPushIssueTest(unittest.TestCase):
                     url="https://github.com/HiroyukiFuruno/katana-render-runtime/issues/64",
                     updated_at="2026-08-29T03:03:00Z",
                 )
+
+                def load_invalid_issue(
+                    _number: int,
+                    issue: subject.Issue = invalid_issue,
+                ) -> subject.Issue:
+                    return issue
+
                 with patch.object(subject, "_gh_json", return_value=compare):
                     with self.assertRaisesRegex(subject.ContractViolation, "snapshot番号"):
                         subject.validate_pr_range(
@@ -2351,7 +2523,7 @@ class VerifyPushIssueTest(unittest.TestCase):
                             base_sha=base_sha,
                             head_sha=head_sha,
                             branch="fix/issue-contract",
-                            issue_loader=lambda _number: invalid_issue,
+                            issue_loader=load_invalid_issue,
                         )
 
     def test_referenced_issue_snapshot_uses_complete_base_to_head_commit_references(self) -> None:
@@ -2439,12 +2611,18 @@ class VerifyPushIssueTest(unittest.TestCase):
         ):
             for invalid_issue in cases:
                 with self.subTest(issue=invalid_issue):
+                    def load_invalid_issue(
+                        _number: int,
+                        issue: subject.Issue = invalid_issue,
+                    ) -> subject.Issue:
+                        return issue
+
                     with self.assertRaisesRegex(subject.ContractViolation, "snapshot番号|canonical"):
                         subject.referenced_issue_snapshot(
                             repository=repository,
                             base_sha=base_sha,
                             head_sha=head_sha,
-                            issue_loader=lambda _number: invalid_issue,
+                            issue_loader=load_invalid_issue,
                         )
 
     def test_pr_range_fails_closed_when_compare_commits_are_truncated(self) -> None:
@@ -2668,68 +2846,33 @@ class VerifyPushIssueTest(unittest.TestCase):
             root = Path(directory)
             repository = root / "repository"
             binary_directory = root / "bin"
-            repository.mkdir()
-            binary_directory.mkdir()
-
-            def git(*arguments: str) -> str:
-                result = subprocess.run(
-                    ["git", *arguments],
-                    cwd=repository,
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-                return result.stdout.strip()
-
-            git("init", "--initial-branch=master")
-            git("config", "user.name", "Issue Contract Test")
-            git("config", "user.email", "issue@example.com")
-            (repository / "base.txt").write_text("base\n", encoding="utf-8")
-            git("add", "base.txt")
-            git("commit", "-m", "initial")
-            base_sha = git("rev-parse", "HEAD")
-            self.configure_live_fetch_remote(
+            git, _, environment = self.prepare_cli_repository(
                 repository,
-                remote="origin",
-                push_url="https://github.com/example/wrong-repository.git",
+                binary_directory,
+                remote_push_urls=(
+                    ("origin", "https://github.com/example/wrong-repository.git"),
+                    (
+                        "upstream",
+                        "https://github.com/HiroyukiFuruno/katana-render-runtime.git",
+                    ),
+                ),
+                tracking_remote="upstream",
             )
-            self.configure_live_fetch_remote(
+            topic_sha = self.create_cli_topic(
                 repository,
-                remote="upstream",
-                push_url="https://github.com/HiroyukiFuruno/katana-render-runtime.git",
+                git,
+                branch="topic",
+                commit_arguments=("-m", "feat: contract", "-m", "Refs #64"),
             )
-            git("update-ref", "refs/remotes/upstream/master", base_sha)
-            git("symbolic-ref", "refs/remotes/upstream/HEAD", "refs/remotes/upstream/master")
-            git("update-ref", "refs/remotes/origin/master", base_sha)
-            git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master")
-            git("switch", "-c", "topic")
-            (repository / "topic.txt").write_text("topic\n", encoding="utf-8")
-            git("add", "topic.txt")
-            git("commit", "-m", "feat: contract", "-m", "Refs #64")
-            topic_sha = git("rev-parse", "HEAD")
-            fake_gh = binary_directory / "gh"
-            fake_gh.write_text(
-                "#!/bin/sh\n"
-                "test \"$5\" = \"HiroyukiFuruno/katana-render-runtime\" || exit 21\n"
-                "printf '%s\\n' "
-                "'{\"number\":64,\"state\":\"OPEN\",\"body\":\"Issue body\","
-                "\"url\":\"https://github.com/HiroyukiFuruno/katana-render-runtime/issues/64\"}'\n",
-                encoding="utf-8",
+            self.install_fake_open_issue_gh(
+                binary_directory,
+                expected_repository="HiroyukiFuruno/katana-render-runtime",
             )
-            fake_gh.chmod(fake_gh.stat().st_mode | stat.S_IXUSR)
-            self.install_fake_push_remote_git(binary_directory)
-            environment = os.environ.copy()
-            environment["PATH"] = f"{binary_directory}:{environment['PATH']}"
-            environment["KRR_TEST_REAL_GIT"] = str(shutil.which("git"))
-            environment["KRR_TEST_PUSH_REMOTE_REF"] = "refs/remotes/upstream/master"
-            result = subprocess.run(
-                [sys.executable, str(Path(subject.__file__)), "--remote", "upstream"],
-                cwd=repository,
-                env=environment,
-                input=f"refs/heads/topic {topic_sha} refs/heads/topic {'0' * 40}\n",
-                capture_output=True,
-                text=True,
-                check=False,
+            result = self.run_cli_with_push_input(
+                repository,
+                environment,
+                f"refs/heads/topic {topic_sha} refs/heads/topic {'0' * 40}\n",
+                arguments=("--remote", "upstream"),
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("issues=#64", result.stdout)
@@ -2739,100 +2882,26 @@ class VerifyPushIssueTest(unittest.TestCase):
             root = Path(directory)
             repository = root / "repository"
             binary_directory = root / "bin"
-            repository.mkdir()
-            binary_directory.mkdir()
-            commands = [
-                ["git", "init", "--initial-branch=master"],
-                ["git", "config", "user.name", "Issue Contract Test"],
-                ["git", "config", "user.email", "issue@example.com"],
-            ]
-            for command in commands:
-                subprocess.run(
-                    command,
-                    cwd=repository,
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-            (repository / "base.txt").write_text("base\n", encoding="utf-8")
-            subprocess.run(
-                ["git", "add", "base.txt"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            subprocess.run(
-                ["git", "commit", "-m", "initial"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            self.configure_live_fetch_remote(
+            git, _, environment = self.prepare_cli_repository(
                 repository,
-                remote="origin",
-                push_url="https://github.com/HiroyukiFuruno/katana-render-runtime.git",
+                binary_directory,
+                remote_push_urls=(
+                    (
+                        "origin",
+                        "https://github.com/HiroyukiFuruno/katana-render-runtime.git",
+                    ),
+                ),
+                tracking_remote="origin",
             )
-            subprocess.run(
-                ["git", "update-ref", "refs/remotes/origin/master", "HEAD"],
-                cwd=repository,
-                check=True,
+            self.create_cli_topic(
+                repository,
+                git,
+                branch="feature/issue-contract",
+                filename="feature.txt",
+                commit_arguments=("-m", "feat: contract", "-m", "Refs #64"),
             )
-            subprocess.run(
-                [
-                    "git",
-                    "symbolic-ref",
-                    "refs/remotes/origin/HEAD",
-                    "refs/remotes/origin/master",
-                ],
-                cwd=repository,
-                check=True,
-            )
-            subprocess.run(
-                ["git", "switch", "-c", "feature/issue-contract"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            (repository / "feature.txt").write_text("feature\n", encoding="utf-8")
-            subprocess.run(
-                ["git", "add", "feature.txt"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            subprocess.run(
-                ["git", "commit", "-m", "feat: contract", "-m", "Refs #64"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            fake_gh = binary_directory / "gh"
-            fake_gh.write_text(
-                "#!/bin/sh\n"
-                "printf '%s\\n' "
-                "'{\"number\":64,\"state\":\"OPEN\",\"body\":\"Issue body\","
-                "\"url\":\"https://github.com/HiroyukiFuruno/katana-render-runtime/issues/64\"}'\n",
-                encoding="utf-8",
-            )
-            fake_gh.chmod(fake_gh.stat().st_mode | stat.S_IXUSR)
-            self.install_fake_push_remote_git(binary_directory)
-            environment = os.environ.copy()
-            environment["PATH"] = f"{binary_directory}:{environment['PATH']}"
-            environment["KRR_TEST_REAL_GIT"] = str(shutil.which("git"))
-            environment["KRR_TEST_PUSH_REMOTE_REF"] = "refs/remotes/origin/master"
-            result = subprocess.run(
-                [sys.executable, str(Path(subject.__file__))],
-                cwd=repository,
-                env=environment,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            self.install_fake_open_issue_gh(binary_directory)
+            result = self.run_cli_with_push_input(repository, environment)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("issues=#64", result.stdout)
 
@@ -2840,175 +2909,49 @@ class VerifyPushIssueTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             binary_directory = repository / "bin"
-            binary_directory.mkdir()
-            commands = [
-                ["git", "init", "--initial-branch=master"],
-                ["git", "config", "user.name", "Issue Contract Test"],
-                ["git", "config", "user.email", "issue@example.com"],
-            ]
-            for command in commands:
-                subprocess.run(
-                    command,
-                    cwd=repository,
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-            (repository / "base.txt").write_text("base\n", encoding="utf-8")
-            subprocess.run(
-                ["git", "add", "base.txt"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            subprocess.run(
-                ["git", "commit", "-m", "initial"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            self.configure_live_fetch_remote(
+            topic_sha, environment = self.create_topic_push_fixture(
                 repository,
-                remote="origin",
-                push_url="https://github.com/HiroyukiFuruno/katana-render-runtime.git",
+                binary_directory,
             )
-            subprocess.run(
-                ["git", "update-ref", "refs/remotes/origin/master", "HEAD"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            subprocess.run(
-                [
-                    "git",
-                    "symbolic-ref",
-                    "refs/remotes/origin/HEAD",
-                    "refs/remotes/origin/master",
-                ],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            subprocess.run(
-                ["git", "switch", "-c", "topic"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            (repository / "topic.txt").write_text("topic\n", encoding="utf-8")
-            subprocess.run(
-                ["git", "add", "topic.txt"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            subprocess.run(
-                ["git", "commit", "-m", "feat: missing Issue reference"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            topic_sha = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-            subprocess.run(
-                ["git", "switch", "master"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
+            subprocess.run(["git", "switch", "master"], cwd=repository, check=True)
             push_update = (
                 f"refs/heads/topic {topic_sha} refs/heads/topic {'0' * 40}\n"
             )
-            self.install_fake_push_remote_git(binary_directory)
-            environment = os.environ.copy()
-            environment["PATH"] = f"{binary_directory}:{environment['PATH']}"
-            environment["KRR_TEST_REAL_GIT"] = str(shutil.which("git"))
-            environment["KRR_TEST_PUSH_REMOTE_REF"] = "refs/remotes/origin/master"
-            result = subprocess.run(
-                [sys.executable, str(Path(subject.__file__))],
-                cwd=repository,
-                env=environment,
-                input=push_update,
-                capture_output=True,
-                text=True,
-                check=False,
+            result = self.run_cli_with_push_input(
+                repository,
+                environment,
+                push_update,
             )
             self.assertEqual(result.returncode, 1)
             self.assertIn("Issue参照", result.stderr)
-
     def test_cli_validates_push_update_from_detached_head(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repository = root / "repository"
             binary_directory = root / "bin"
-            repository.mkdir()
-            binary_directory.mkdir()
-
-            def git(*arguments: str) -> str:
-                result = subprocess.run(
-                    ["git", *arguments],
-                    cwd=repository,
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-                return result.stdout.strip()
-
-            git("init", "--initial-branch=master")
-            git("config", "user.name", "Issue Contract Test")
-            git("config", "user.email", "issue@example.com")
-            (repository / "base.txt").write_text("base\n", encoding="utf-8")
-            git("add", "base.txt")
-            git("commit", "-m", "initial")
-            base_sha = git("rev-parse", "HEAD")
-            self.configure_live_fetch_remote(
+            git, base_sha, environment = self.prepare_cli_repository(
                 repository,
-                remote="origin",
-                push_url="https://github.com/HiroyukiFuruno/katana-render-runtime.git",
+                binary_directory,
+                remote_push_urls=(
+                    (
+                        "origin",
+                        "https://github.com/HiroyukiFuruno/katana-render-runtime.git",
+                    ),
+                ),
+                tracking_remote="origin",
             )
-            git("update-ref", "refs/remotes/origin/master", base_sha)
-            git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master")
-            git("switch", "-c", "topic")
-            (repository / "topic.txt").write_text("topic\n", encoding="utf-8")
-            git("add", "topic.txt")
-            git("commit", "-m", "feat: detached push", "-m", "Refs #64")
-            topic_sha = git("rev-parse", "HEAD")
+            topic_sha = self.create_cli_topic(
+                repository,
+                git,
+                branch="topic",
+                commit_arguments=("-m", "feat: detached push", "-m", "Refs #64"),
+            )
             git("switch", "--detach", base_sha)
-            fake_gh = binary_directory / "gh"
-            fake_gh.write_text(
-                "#!/bin/sh\n"
-                "printf '%s\\n' "
-                "'{\"number\":64,\"state\":\"OPEN\",\"body\":\"Issue body\","
-                "\"url\":\"https://github.com/HiroyukiFuruno/katana-render-runtime/issues/64\"}'\n",
-                encoding="utf-8",
-            )
-            fake_gh.chmod(fake_gh.stat().st_mode | stat.S_IXUSR)
-            self.install_fake_push_remote_git(binary_directory)
-            environment = os.environ.copy()
-            environment["PATH"] = f"{binary_directory}:{environment['PATH']}"
-            environment["KRR_TEST_REAL_GIT"] = str(shutil.which("git"))
-            environment["KRR_TEST_PUSH_REMOTE_REF"] = "refs/remotes/origin/master"
-            result = subprocess.run(
-                [sys.executable, str(Path(subject.__file__))],
-                cwd=repository,
-                env=environment,
-                input=f"refs/heads/topic {topic_sha} refs/heads/topic {'0' * 40}\n",
-                capture_output=True,
-                text=True,
-                check=False,
+            self.install_fake_open_issue_gh(binary_directory)
+            result = self.run_cli_with_push_input(
+                repository,
+                environment,
+                f"refs/heads/topic {topic_sha} refs/heads/topic {'0' * 40}\n",
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("issues=#64", result.stdout)
@@ -3018,68 +2961,25 @@ class VerifyPushIssueTest(unittest.TestCase):
             root = Path(directory)
             repository = root / "repository"
             binary_directory = root / "bin"
-            repository.mkdir()
-            binary_directory.mkdir()
-
-            def git(*arguments: str) -> str:
-                result = subprocess.run(
-                    ["git", *arguments],
-                    cwd=repository,
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-                return result.stdout.strip()
-
-            git("init", "--initial-branch=master")
-            git("config", "user.name", "Issue Contract Test")
-            git("config", "user.email", "issue@example.com")
-            (repository / "base.txt").write_text("base\n", encoding="utf-8")
-            git("add", "base.txt")
-            git("commit", "-m", "initial")
-            base_sha = git("rev-parse", "HEAD")
             remote_url = "https://github.com/HiroyukiFuruno/katana-render-runtime.git"
-            self.configure_live_fetch_remote(
+            git, _, environment = self.prepare_cli_repository(
                 repository,
-                remote="origin",
-                push_url=remote_url,
+                binary_directory,
+                remote_push_urls=(("origin", remote_url),),
+                tracking_remote="origin",
             )
-            git("update-ref", "refs/remotes/origin/master", base_sha)
-            git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master")
-            git("switch", "-c", "topic")
-            (repository / "topic.txt").write_text("topic\n", encoding="utf-8")
-            git("add", "topic.txt")
-            git("commit", "-m", "feat: url push", "-m", "Refs #64")
-            topic_sha = git("rev-parse", "HEAD")
-            fake_gh = binary_directory / "gh"
-            fake_gh.write_text(
-                "#!/bin/sh\n"
-                "printf '%s\\n' "
-                "'{\"number\":64,\"state\":\"OPEN\",\"body\":\"Issue body\","
-                "\"url\":\"https://github.com/HiroyukiFuruno/katana-render-runtime/issues/64\"}'\n",
-                encoding="utf-8",
+            topic_sha = self.create_cli_topic(
+                repository,
+                git,
+                branch="topic",
+                commit_arguments=("-m", "feat: url push", "-m", "Refs #64"),
             )
-            fake_gh.chmod(fake_gh.stat().st_mode | stat.S_IXUSR)
-            self.install_fake_push_remote_git(binary_directory)
-            environment = os.environ.copy()
-            environment["PATH"] = f"{binary_directory}:{environment['PATH']}"
-            environment["KRR_TEST_REAL_GIT"] = str(shutil.which("git"))
-            environment["KRR_TEST_PUSH_REMOTE_REF"] = "refs/remotes/origin/master"
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(Path(subject.__file__)),
-                    "--remote",
-                    remote_url,
-                    "--remote-url",
-                    remote_url,
-                ],
-                cwd=repository,
-                env=environment,
-                input=f"refs/heads/topic {topic_sha} refs/heads/topic {'0' * 40}\n",
-                capture_output=True,
-                text=True,
-                check=False,
+            self.install_fake_open_issue_gh(binary_directory)
+            result = self.run_cli_with_push_input(
+                repository,
+                environment,
+                f"refs/heads/topic {topic_sha} refs/heads/topic {'0' * 40}\n",
+                arguments=("--remote", remote_url, "--remote-url", remote_url),
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("issues=#64", result.stdout)
@@ -3088,108 +2988,21 @@ class VerifyPushIssueTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             binary_directory = repository / "bin"
-            binary_directory.mkdir()
-            commands = [
-                ["git", "init", "--initial-branch=master"],
-                ["git", "config", "user.name", "Issue Contract Test"],
-                ["git", "config", "user.email", "issue@example.com"],
-            ]
-            for command in commands:
-                subprocess.run(
-                    command,
-                    cwd=repository,
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-            (repository / "base.txt").write_text("base\n", encoding="utf-8")
-            subprocess.run(
-                ["git", "add", "base.txt"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            subprocess.run(
-                ["git", "commit", "-m", "initial"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            self.configure_live_fetch_remote(
+            topic_sha, environment = self.create_topic_push_fixture(
                 repository,
-                remote="origin",
-                push_url="https://github.com/HiroyukiFuruno/katana-render-runtime.git",
+                binary_directory,
             )
-            subprocess.run(
-                ["git", "update-ref", "refs/remotes/origin/master", "HEAD"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
+            push_update = (
+                f"refs/tags/v0.0.0 {topic_sha} "
+                f"refs/tags/v0.0.0 {'0' * 40}\n"
             )
-            subprocess.run(
-                [
-                    "git",
-                    "symbolic-ref",
-                    "refs/remotes/origin/HEAD",
-                    "refs/remotes/origin/master",
-                ],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            subprocess.run(
-                ["git", "switch", "-c", "topic"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            (repository / "topic.txt").write_text("topic\n", encoding="utf-8")
-            subprocess.run(
-                ["git", "add", "topic.txt"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            subprocess.run(
-                ["git", "commit", "-m", "feat: missing Issue reference"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            topic_sha = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-            self.install_fake_push_remote_git(binary_directory)
-            environment = os.environ.copy()
-            environment["PATH"] = f"{binary_directory}:{environment['PATH']}"
-            environment["KRR_TEST_REAL_GIT"] = str(shutil.which("git"))
-            environment["KRR_TEST_PUSH_REMOTE_REF"] = "refs/remotes/origin/master"
-            result = subprocess.run(
-                [sys.executable, str(Path(subject.__file__))],
-                cwd=repository,
-                env=environment,
-                input=(
-                    f"refs/tags/v0.0.0 {topic_sha} "
-                    f"refs/tags/v0.0.0 {'0' * 40}\n"
-                ),
-                capture_output=True,
-                text=True,
-                check=False,
+            result = self.run_cli_with_push_input(
+                repository,
+                environment,
+                push_update,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("Issue contract skipped", result.stdout)
-
 
 if __name__ == "__main__":
     unittest.main()

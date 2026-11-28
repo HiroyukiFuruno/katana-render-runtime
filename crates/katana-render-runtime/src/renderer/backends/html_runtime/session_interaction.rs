@@ -8,12 +8,43 @@ use super::super::types::{
 };
 use super::StaticHtmlRuntimeSession;
 
+#[path = "session_interaction_focus.rs"]
+mod focus;
+#[path = "session_interaction_navigation.rs"]
+mod navigation;
+
+pub(super) use focus::set_focused_element;
+use navigation::{navigation_intent, scriptless_event_navigation};
+
 impl StaticHtmlRuntimeSession {
+    pub(crate) fn set_active_element(
+        &mut self,
+        node_id: Option<u64>,
+    ) -> Result<(), HtmlRuntimeError> {
+        if self.scriptless_document.is_some() {
+            #[cfg(test)]
+            if let Some(observer) = &mut self.scriptless_observer {
+                observer.focused_node = node_id;
+            }
+            return Ok(());
+        }
+        let result = self.run_active_element_update(node_id);
+        self.discard_on_timeout(result)
+    }
+
+    fn run_active_element_update(&mut self, node_id: Option<u64>) -> Result<(), HtmlRuntimeError> {
+        let isolate = self.isolate.as_mut().ok_or_else(discarded_runtime_error)?;
+        let context = self.context.as_ref().ok_or_else(discarded_runtime_error)?;
+        v8::scope!(let handle_scope, isolate);
+        let context = v8::Local::new(handle_scope, context);
+        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
+        v8::tc_scope!(let scope, &mut **context_scope);
+        set_focused_element(scope, node_id)
+    }
+
     pub(crate) fn body_node(&mut self) -> Option<HtmlNodeId> {
-        self.isolate
-            .as_mut()?
-            .get_slot::<HtmlDomBridgeState>()?
-            .document
+        self.dom_document()
+            .ok()?
             .borrow_mut()
             .query_selector("body")
             .map(HtmlNodeId)
@@ -21,10 +52,8 @@ impl StaticHtmlRuntimeSession {
 
     #[cfg(test)]
     pub(crate) fn node_for_element_id(&mut self, id: &str) -> Option<HtmlNodeId> {
-        self.isolate
-            .as_mut()?
-            .get_slot::<HtmlDomBridgeState>()?
-            .document
+        self.dom_document()
+            .ok()?
             .borrow_mut()
             .get_element_by_id(id)
             .map(HtmlNodeId)
@@ -34,33 +63,33 @@ impl StaticHtmlRuntimeSession {
         &mut self,
         event: HtmlRuntimeEvent,
     ) -> Result<HtmlRuntimeDispatch, HtmlRuntimeError> {
+        self.dispatch_with_default_prevented(event)
+            .map(|(dispatch, _)| dispatch)
+    }
+
+    pub(crate) fn dispatch_with_default_prevented(
+        &mut self,
+        event: HtmlRuntimeEvent,
+    ) -> Result<(HtmlRuntimeDispatch, bool), HtmlRuntimeError> {
         let result = self.run_event(event);
-        if matches!(result, Err(HtmlRuntimeError::ExecutionTimeout)) {
-            self.discard();
-        }
-        result
+        self.discard_on_timeout(result)
     }
 
     pub(crate) fn dispatch_window_scroll(
         &mut self,
     ) -> Result<HtmlRuntimeDispatch, HtmlRuntimeError> {
-        let result = self.run_window_event(HtmlRuntimeEventKind::Scroll);
-        if matches!(result, Err(HtmlRuntimeError::ExecutionTimeout)) {
-            self.discard();
+        if self.scriptless_document.is_some() {
+            return self.current_dispatch(None);
         }
-        result
+        let result = self.run_window_event(HtmlRuntimeEventKind::Scroll);
+        self.discard_on_timeout(result)
     }
 
     pub(in crate::renderer::backends) fn node_path(
         &self,
         node_id: u64,
     ) -> Result<std::collections::HashSet<u64>, HtmlRuntimeError> {
-        self.isolate
-            .as_ref()
-            .ok_or_else(discarded_runtime_error)?
-            .get_slot::<HtmlDomBridgeState>()
-            .ok_or_else(dom_state_unavailable_error)?
-            .document
+        self.dom_document()?
             .borrow()
             .event_path(node_id)
             .map(|path| path.into_iter().collect())
@@ -70,11 +99,15 @@ impl StaticHtmlRuntimeSession {
     fn run_event(
         &mut self,
         event: HtmlRuntimeEvent,
-    ) -> Result<HtmlRuntimeDispatch, HtmlRuntimeError> {
+    ) -> Result<(HtmlRuntimeDispatch, bool), HtmlRuntimeError> {
         let kind = event.kind();
         let target = event.target();
+        if let Some(document) = &self.scriptless_document {
+            let navigation = scriptless_event_navigation(&document.borrow(), target, kind)?;
+            return Ok((self.current_dispatch(navigation)?, false));
+        }
         let key = event.key();
-        let navigation = {
+        let (navigation, default_prevented) = {
             let isolate = self.isolate.as_mut().ok_or_else(discarded_runtime_error)?;
             let context = self.context.as_ref().ok_or_else(discarded_runtime_error)?;
             v8::scope!(let handle_scope, isolate);
@@ -83,10 +116,7 @@ impl StaticHtmlRuntimeSession {
             v8::tc_scope!(let scope, &mut **context_scope);
             dispatch_event(scope, target.0, kind, key)?
         };
-        Ok(HtmlRuntimeDispatch {
-            content: self.snapshot()?,
-            navigation,
-        })
+        Ok((self.current_dispatch(navigation)?, default_prevented))
     }
 
     fn run_window_event(
@@ -102,15 +132,29 @@ impl StaticHtmlRuntimeSession {
             v8::tc_scope!(let scope, &mut **context_scope);
             dispatch_window_event(scope, kind.as_str())?;
         }
+        self.current_dispatch(None)
+    }
+
+    fn current_dispatch(
+        &self,
+        navigation: Option<HtmlNavigationIntent>,
+    ) -> Result<HtmlRuntimeDispatch, HtmlRuntimeError> {
         Ok(HtmlRuntimeDispatch {
             content: self.snapshot()?,
-            navigation: None,
+            navigation,
         })
     }
 
-    pub(super) fn discard(&mut self) {
-        self.context.take();
-        self.isolate.take();
+    pub(super) fn discard_on_timeout<T>(
+        &mut self,
+        result: Result<T, HtmlRuntimeError>,
+    ) -> Result<T, HtmlRuntimeError> {
+        if matches!(result, Err(HtmlRuntimeError::ExecutionTimeout)) {
+            /* WHY: isolateを破棄する前に、そこに属するGlobal参照を解放する。 */
+            self.context.take();
+            self.isolate.take();
+        }
+        result
     }
 }
 
@@ -123,30 +167,19 @@ fn dispatch_event(
     node_id: u64,
     kind: HtmlRuntimeEventKind,
     key: Option<&str>,
-) -> Result<Option<HtmlNavigationIntent>, HtmlRuntimeError> {
+) -> Result<(Option<HtmlNavigationIntent>, bool), HtmlRuntimeError> {
     let event = event(scope, node_id, kind.as_str(), key)?;
     check_bridge_error(scope)?;
-    if kind == HtmlRuntimeEventKind::Click {
-        navigation_intent(scope, node_id, event)
+    let default_prevented = event_default_prevented(scope, event)?;
+    let navigation = if kind == HtmlRuntimeEventKind::Click && !default_prevented {
+        let state = scope
+            .get_slot::<HtmlDomBridgeState>()
+            .ok_or_else(dom_state_unavailable_error)?;
+        navigation_intent(&state.document.borrow(), node_id)?
     } else {
-        Ok(None)
-    }
+        None
+    };
+    Ok((navigation, default_prevented))
 }
 
-fn navigation_intent(
-    scope: &mut HtmlTryCatchScope<'_, '_, '_, '_>,
-    node_id: u64,
-    event: v8::Local<v8::Object>,
-) -> Result<Option<HtmlNavigationIntent>, HtmlRuntimeError> {
-    if event_default_prevented(scope, event)? {
-        return Ok(None);
-    }
-    scope
-        .get_slot::<HtmlDomBridgeState>()
-        .ok_or_else(dom_state_unavailable_error)?
-        .document
-        .borrow()
-        .attribute(node_id, "href")
-        .map_err(HtmlRuntimeError::DomBridge)
-        .map(|href| href.map(|href| HtmlNavigationIntent { href }))
-}
+use crate::private_v8 as v8;

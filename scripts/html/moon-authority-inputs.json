@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "inputs": {
+    ".moon/workspace.yml": true,
+    "moon.yml": true,
+    "Justfile": true,
+    "package.json": true,
+    "bun.lock": true,
+    "scripts/html/harness-contract-cli.ts": true,
+    "scripts/html/harness-contract-graph.ts": true,
+    "scripts/html/native-coverage-cache-contract.ts": true,
+    "scripts/html/moon-quality-inputs.ts": true,
+    "scripts/html/harness-contract-policy.json": true,
+    "scripts/hooks/run_parallel_checks.py": true,
+    "scripts/release/native_coverage_local_aggregate.py": true,
+    "scripts/release/native_coverage_local_anchor.py": true,
+    "scripts/release/native_coverage_local_context.py": true,
+    "scripts/release/native_coverage_local_result.py": true,
+    "scripts/release/native_coverage_linux_context.py": true,
+    "scripts/release/native_coverage_result.py": true,
+    "scripts/release/native_coverage_result_cli.py": true,
+    "scripts/mermaid/native-source-manifest.ts": true,
+    "scripts/mermaid/mermaid-pair-manifest.ts": true,
+    "scripts/mermaid/native-build-receipt.ts": true,
+    "scripts/mermaid/native-cli-managed-build.ts": true,
+    "scripts/mermaid/native-cli-managed-build-schema.ts": true,
+    "scripts/mermaid/native-cli-managed-json.ts": true,
+    "scripts/html/moon-authority-inputs.json": true
+  }
+}

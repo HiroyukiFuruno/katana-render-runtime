@@ -1,7 +1,6 @@
-use super::{PLANTUML_ENV_LOCK, PLANTUML_JAR_VERSION, PlantUmlJarAssetOps};
-use std::ffi::OsString;
+use super::super::test_support::{EnvOverride, env_guard};
+use super::{PLANTUML_JAR_VERSION, PlantUmlJarAssetOps};
 use std::path::{Path, PathBuf};
-use std::sync::MutexGuard;
 
 #[test]
 fn default_cache_path_uses_krr_namespace() -> Result<(), String> {
@@ -69,6 +68,7 @@ fn asset_helpers_cover_digest_temp_path_and_empty_environment() -> Result<(), St
 #[test]
 #[cfg(unix)]
 fn temp_path_falls_back_for_non_utf8_file_names() -> Result<(), String> {
+    use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
 
     let path = PathBuf::from(OsString::from_vec(vec![0xff]));
@@ -80,36 +80,4 @@ fn temp_path_falls_back_for_non_utf8_file_names() -> Result<(), String> {
 
     assert!(name.starts_with("plantuml.jar.tmp-"));
     Ok(())
-}
-
-struct EnvOverride {
-    key: &'static str,
-    original: Option<OsString>,
-}
-
-impl EnvOverride {
-    fn set(key: &'static str, value: &'static str) -> Self {
-        let original = std::env::var_os(key);
-        unsafe { std::env::set_var(key, value) };
-        Self { key, original }
-    }
-
-    fn unset(key: &'static str) -> Self {
-        let original = std::env::var_os(key);
-        unsafe { std::env::remove_var(key) };
-        Self { key, original }
-    }
-}
-
-impl Drop for EnvOverride {
-    fn drop(&mut self) {
-        match &self.original {
-            Some(value) => unsafe { std::env::set_var(self.key, value) },
-            None => unsafe { std::env::remove_var(self.key) },
-        }
-    }
-}
-
-fn env_guard() -> Result<MutexGuard<'static, ()>, String> {
-    PLANTUML_ENV_LOCK.lock().map_err(|error| error.to_string())
 }

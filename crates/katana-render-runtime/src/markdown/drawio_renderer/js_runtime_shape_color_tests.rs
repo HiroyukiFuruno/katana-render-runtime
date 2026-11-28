@@ -1,4 +1,5 @@
 use super::DrawioJsRuntimeOps;
+use super::test_support::{fake_color_bundle, fake_color_shape_group};
 use crate::markdown::color_preset::DiagramColorPreset;
 
 #[test]
@@ -46,28 +47,19 @@ fn temp_runtime_path(prefix: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("{prefix}-{}.js", std::process::id()))
 }
 
-fn fake_light_dark_bundle() -> &'static str {
-    FAKE_LIGHT_DARK_BUNDLE
+fn fake_light_dark_bundle() -> String {
+    let shape = fake_color_shape_group("url(#gradient)");
+    let svg_body = [FAKE_LIGHT_DARK_SVG_DEFS, shape.as_str()].concat();
+    fake_color_bundle(FAKE_LIGHT_DARK_MX_UTILS, &svg_body)
 }
 
-const FAKE_LIGHT_DARK_BUNDLE: &str = r##"
-function Graph() {}
-var mxUtils = {
+const FAKE_LIGHT_DARK_MX_UTILS: &str = r###"var mxUtils = {
   lightDarkColorSupported: false,
   preferDarkColor: true,
 };
-const Editor = {
-  convertHtmlToText(value) {
-    return String(value);
-  },
-};
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "80");
-  svg.setAttribute("height", "30");
-  svg.setAttribute("viewBox", "0 0 80 30");
-  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+"###;
+
+const FAKE_LIGHT_DARK_SVG_DEFS: &str = r###"  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
   const gradient = document.createElementNS("http://www.w3.org/2000/svg", "linearGradient");
   gradient.setAttribute("id", "gradient");
   const stop = document.createElementNS("http://www.w3.org/2000/svg", "stop");
@@ -79,33 +71,16 @@ GraphViewer.createViewerForElement = function createViewerForElement(_container,
   gradient.appendChild(stop);
   defs.appendChild(gradient);
   svg.appendChild(defs);
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  group.setAttribute("data-cell-id", "cell");
-  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  rect.setAttribute("x", "0");
-  rect.setAttribute("y", "0");
-  rect.setAttribute("width", "80");
-  rect.setAttribute("height", "30");
-  rect.setAttribute("fill", "url(#gradient)");
-  group.appendChild(rect);
-  svg.appendChild(group);
-  callback({
-    graph: {
-      getSvg() {
-        return svg;
-      },
-    },
-  });
-};
-"##;
+"###;
 
-fn fake_source_fill_bundle() -> &'static str {
-    FAKE_SOURCE_FILL_BUNDLE
+fn fake_source_fill_bundle() -> String {
+    fake_color_bundle(
+        FAKE_SOURCE_FILL_MX_UTILS,
+        &fake_color_shape_group("#CEDBE1"),
+    )
 }
 
-const FAKE_SOURCE_FILL_BUNDLE: &str = r##"
-function Graph() {}
-var mxUtils = {
+const FAKE_SOURCE_FILL_MX_UTILS: &str = r###"var mxUtils = {
   getLightDarkColor(value) {
     return {
       light: value,
@@ -114,33 +89,4 @@ var mxUtils = {
     };
   },
 };
-const Editor = {
-  convertHtmlToText(value) {
-    return String(value);
-  },
-};
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "80");
-  svg.setAttribute("height", "30");
-  svg.setAttribute("viewBox", "0 0 80 30");
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  group.setAttribute("data-cell-id", "cell");
-  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  rect.setAttribute("x", "0");
-  rect.setAttribute("y", "0");
-  rect.setAttribute("width", "80");
-  rect.setAttribute("height", "30");
-  rect.setAttribute("fill", "#CEDBE1");
-  group.appendChild(rect);
-  svg.appendChild(group);
-  callback({
-    graph: {
-      getSvg() {
-        return svg;
-      },
-    },
-  });
-};
-"##;
+"###;

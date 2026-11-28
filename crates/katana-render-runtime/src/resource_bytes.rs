@@ -1,0 +1,195 @@
+use moka::sync::Cache;
+use sha2::{Digest, Sha256};
+use std::{
+    fs::File,
+    io::Read,
+    path::{Path, PathBuf},
+    sync::{Arc, OnceLock},
+    time::SystemTime,
+};
+
+const CACHE_BYTES: u64 = 16 * 1024 * 1024;
+const ENTRY_OVERHEAD: usize = 512;
+static CACHE: OnceLock<Cache<PathBuf, Arc<ResourceSnapshot>>> = OnceLock::new();
+
+#[derive(PartialEq, Eq)]
+struct Identity {
+    len: u64,
+    modified: Option<SystemTime>,
+    created: Option<SystemTime>,
+    #[cfg(unix)]
+    unix: (u64, u64, i64, i64),
+    #[cfg(windows)]
+    windows: same_file::Handle,
+}
+
+impl Identity {
+    fn from_file(file: &File) -> std::io::Result<Self> {
+        let metadata = regular_file_metadata(file)?;
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        Ok(Self {
+            len: metadata.len(),
+            modified: metadata.modified().ok(),
+            created: metadata.created().ok(),
+            #[cfg(unix)]
+            unix: (
+                metadata.dev(),
+                metadata.ino(),
+                metadata.ctime(),
+                metadata.ctime_nsec(),
+            ),
+            #[cfg(windows)]
+            windows: same_file::Handle::from_file(file.try_clone()?)?,
+        })
+    }
+}
+
+fn regular_file_metadata(file: &File) -> std::io::Result<std::fs::Metadata> {
+    let metadata = file.metadata()?;
+    if metadata.is_file() {
+        return Ok(metadata);
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "resource path is not a regular file",
+    ))
+}
+
+pub(crate) struct ResourceSnapshot {
+    content: ResourceContent,
+    digest: OnceLock<String>,
+    identity: Identity,
+}
+
+enum ResourceContent {
+    Text(Arc<String>),
+    Binary(Vec<u8>),
+}
+
+impl ResourceSnapshot {
+    pub(crate) fn bytes(&self) -> &[u8] {
+        match &self.content {
+            ResourceContent::Text(text) => text.as_bytes(),
+            ResourceContent::Binary(bytes) => bytes,
+        }
+    }
+    pub(crate) fn digest(&self) -> &str {
+        self.digest.get_or_init(|| {
+            Sha256::digest(self.bytes())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect()
+        })
+    }
+    pub(crate) fn text_handle(&self) -> std::io::Result<Arc<String>> {
+        match &self.content {
+            ResourceContent::Text(text) => Ok(Arc::clone(text)),
+            ResourceContent::Binary(_) => Err(Self::invalid_utf8()),
+        }
+    }
+
+    fn invalid_utf8() -> std::io::Error {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "stream did not contain valid UTF-8",
+        )
+    }
+}
+
+pub(crate) struct ResourceBytes;
+
+impl ResourceBytes {
+    pub(crate) fn snapshot(path: &Path) -> std::io::Result<Arc<ResourceSnapshot>> {
+        let file = File::open(path)?;
+        let before = Identity::from_file(&file)?;
+        let cache = CACHE.get_or_init(Self::cache);
+        if let Some(snapshot) = Self::cached(cache, path, &before) {
+            return Ok(snapshot);
+        }
+        let snapshot = Self::read_snapshot(file, before)?;
+        Self::remember(cache, path, &snapshot);
+        Ok(snapshot)
+    }
+
+    fn cached(
+        cache: &Cache<PathBuf, Arc<ResourceSnapshot>>,
+        path: &Path,
+        identity: &Identity,
+    ) -> Option<Arc<ResourceSnapshot>> {
+        identity.modified?;
+        let snapshot = cache
+            .get(path)
+            .filter(|snapshot| snapshot.identity == *identity)?;
+        /* WHY: Windowsでは同じ長さの上書きを更新日時だけでは判定できない。 */
+        #[cfg(windows)]
+        if !Self::read_file(path).is_ok_and(|bytes| bytes == snapshot.bytes()) {
+            return None;
+        }
+        Some(snapshot)
+    }
+
+    fn remember(
+        cache: &Cache<PathBuf, Arc<ResourceSnapshot>>,
+        path: &Path,
+        snapshot: &Arc<ResourceSnapshot>,
+    ) {
+        let weight = snapshot
+            .bytes()
+            .len()
+            .saturating_add(path.as_os_str().len())
+            .saturating_add(ENTRY_OVERHEAD);
+        if snapshot.identity.modified.is_some() && weight <= CACHE_BYTES as usize {
+            cache.insert(path.to_path_buf(), snapshot.clone());
+            cache.run_pending_tasks();
+        }
+    }
+
+    fn read_snapshot(mut file: File, before: Identity) -> std::io::Result<Arc<ResourceSnapshot>> {
+        let bytes = Self::read_contents(&mut file)?;
+        let after = Identity::from_file(&file)?;
+        if before != after || before.len != bytes.len() as u64 {
+            return Err(std::io::Error::other("resource changed while reading"));
+        }
+        let content = match String::from_utf8(bytes) {
+            Ok(text) => ResourceContent::Text(Arc::new(text)),
+            Err(error) => ResourceContent::Binary(error.into_bytes()),
+        };
+        Ok(Arc::new(ResourceSnapshot {
+            content,
+            digest: OnceLock::new(),
+            identity: after,
+        }))
+    }
+
+    fn cache() -> Cache<PathBuf, Arc<ResourceSnapshot>> {
+        Cache::builder()
+            .max_capacity(CACHE_BYTES)
+            .weigher(|path: &PathBuf, value: &Arc<ResourceSnapshot>| {
+                value
+                    .bytes()
+                    .len()
+                    .saturating_add(path.as_os_str().len())
+                    .saturating_add(ENTRY_OVERHEAD)
+                    .try_into()
+                    .unwrap_or(u32::MAX)
+            })
+            .build()
+    }
+
+    pub(crate) fn read_file(path: &Path) -> std::io::Result<Vec<u8>> {
+        let mut file = File::open(path)?;
+        regular_file_metadata(&file)?;
+        Self::read_contents(&mut file)
+    }
+
+    fn read_contents(file: &mut File) -> std::io::Result<Vec<u8>> {
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+}
+
+#[cfg(test)]
+#[path = "resource_bytes_tests.rs"]
+mod tests;

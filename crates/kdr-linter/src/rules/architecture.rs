@@ -2,6 +2,7 @@ use crate::diagnostics::{KdrLintError, Violation};
 use crate::workspace::WorkspaceModel;
 
 use super::cli_duplication::CliDuplicationRule;
+use super::font_platform_boundary;
 use super::manifest_boundary::ManifestBoundaryRule;
 
 pub const LIB_CRATE: &str = "crates/katana-render-runtime";
@@ -14,6 +15,7 @@ impl ArchitectureRule {
         let mut violations = Vec::new();
         violations.extend(ManifestBoundaryRule::check(workspace.root())?);
         violations.extend(CliDuplicationRule::check(workspace));
+        violations.extend(font_platform_boundary::check(workspace));
         Ok(violations)
     }
 }

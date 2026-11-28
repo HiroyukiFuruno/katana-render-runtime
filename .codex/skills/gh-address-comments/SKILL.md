@@ -63,7 +63,7 @@ query($owner:String!, $repo:String!, $number:Int!, $reviewsCursor:String, $threa
 3. 今回の PR、別 PR、または別リポジトリのどこが責務を持つか。
 4. 対応・見送りの根拠と、必要な検証。
 
-P0/P1 は必ず内容を精査し、正当なら必須修正とする。不当、前提違い、またはスコープ外なら技術的根拠を返信する。評価後、分離可能な修正をファイル/責務ごとに subagent へ並列委譲し、main が差分を統合レビューする。
+[リリース手順のコードフリーズ規則](../../../docs/release.md#prレビューのコードフリーズ)に従い、初回から残る指摘と各再レビューで初めて出た指摘を分ける。後続対応する指摘はIssueへ記録し、該当スレッドにリンクを返信してから解決する。不当、前提違い、またはスコープ外なら技術的根拠を返信する。評価後、分離可能な修正をファイルや責務ごとに委譲し、mainが差分を統合レビューする。
 
 ## 3. 修正と検証
 
@@ -95,12 +95,12 @@ mutation($threadId:ID!) {
 
 ## 5. 最新 HEAD のレビュー反復
 
-pushまたはPR本文変更後は、最新 HEAD に対して `@codex review` と自己レビューを再実施する。Issueコメント、formal reviews、review threadsを全ページ取得し、新しい指摘を個別に修正・reply・resolveする。
+pushまたはPR本文変更後は、最新HEADに対して `@codex review` と自己レビューを再実施する。Issueコメント、formal reviews、review threadsを全ページ取得し、新しい指摘もコードフリーズ規則に従って分類し、個別に返信して解決する。
 
 
 
 ## 6. 完了判定
 
-最新HEADレビュー、未解決thread 0、P0/P1対応済み、Issue/DoDを確認してReady化する。Readyで起動したnative required CI checksの成功を確認し、DraftのSKIPを品質成功として扱わない。merge直前にexpected HEAD SHAとrequired checksを再取得し、protected PR mergeを実行する。
+最新HEADのレビュー、未解決スレッド0件、今回必須の修正完了、後続Issueへの記録、IssueとDoDを確認してReady化する。Readyで起動した必須CIの成功を確認する。マージ直前にHEADのSHAと必須チェックを再取得し、保護マージを実行する。
 
 ## 継続実行と停止条件

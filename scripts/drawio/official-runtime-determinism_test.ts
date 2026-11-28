@@ -1,9 +1,11 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import { type Context, createContext, runInContext } from "node:vm";
 
 import { installDrawioDeterminism } from "./official-runtime-determinism";
+import type { DeterminismChildMode } from "./official-runtime-determinism-child";
 
 const FIXED_NOW = Date.parse("2026-01-01T00:00:00.000Z");
 const SHARED_DOM_BROWSER_GLOBALS = readFileSync(
@@ -26,34 +28,26 @@ type DeterminismSample = {
   randoms: number[];
 };
 
-function sampleDateCallInTimezone(timezone: string): string {
-  const script = `
-    const installDrawioDeterminism = ${installDrawioDeterminism.toString()};
-    installDrawioDeterminism();
-    process.stdout.write(Date());
-  `;
-  const result = spawnSync(process.execPath, ["-e", script], {
-    env: { ...process.env, TZ: timezone },
-    encoding: "utf8",
-  });
+function sampleInChild(mode: DeterminismChildMode, timezone: string, locale?: string): string {
+  const result = spawnSync(
+    process.execPath,
+    [path.join(import.meta.dir, "official-runtime-determinism-child.ts"), mode],
+    {
+      env: { ...process.env, TZ: timezone, ...(locale ? { LANG: locale, LC_ALL: locale } : {}) },
+      encoding: "utf8",
+    },
+  );
   expect(result.status).toBe(0);
   expect(result.stderr).toBe("");
   return result.stdout;
 }
 
+function sampleDateCallInTimezone(timezone: string): string {
+  return sampleInChild("date-call", timezone);
+}
+
 function sampleDateToStringInTimezone(timezone: string): string {
-  const script = `
-    const installDrawioDeterminism = ${installDrawioDeterminism.toString()};
-    installDrawioDeterminism();
-    process.stdout.write(new Date("2024-02-03T04:05:06.000Z").toString());
-  `;
-  const result = spawnSync(process.execPath, ["-e", script], {
-    env: { ...process.env, TZ: timezone },
-    encoding: "utf8",
-  });
-  expect(result.status).toBe(0);
-  expect(result.stderr).toBe("");
-  return result.stdout;
+  return sampleInChild("date-string", timezone);
 }
 
 function sampleLocaleCalls(
@@ -64,44 +58,15 @@ function sampleLocaleCalls(
   string: string;
   time: string;
 } {
-  const script = `
-    const installDrawioDeterminism = ${installDrawioDeterminism.toString()};
-    installDrawioDeterminism();
-    process.stdout.write(JSON.stringify({
-      date: new Date().toLocaleDateString(),
-      string: new Date().toLocaleString(),
-      time: new Date().toLocaleTimeString(),
-    }));
-  `;
-  const result = spawnSync(process.execPath, ["-e", script], {
-    env: { ...process.env, TZ: timezone, LANG: locale, LC_ALL: locale },
-    encoding: "utf8",
-  });
-  expect(result.status).toBe(0);
-  expect(result.stderr).toBe("");
-  return JSON.parse(result.stdout) as { date: string; string: string; time: string };
+  return JSON.parse(sampleInChild("locale", timezone, locale)) as {
+    date: string;
+    string: string;
+    time: string;
+  };
 }
 
 function sampleFormattedPlaceholderInTimezone(timezone: string): string {
-  const script = `
-    const installDrawioDeterminism = ${installDrawioDeterminism.toString()};
-    installDrawioDeterminism();
-    const date = new Date();
-    const pad = (value) => String(value).padStart(2, "0");
-    process.stdout.write(
-      [date.getFullYear(), pad(date.getMonth() + 1), pad(date.getDate())].join("-") +
-        "T" +
-        [pad(date.getHours()), pad(date.getMinutes()), pad(date.getSeconds())].join(":") +
-        "Z",
-    );
-  `;
-  const result = spawnSync(process.execPath, ["-e", script], {
-    env: { ...process.env, TZ: timezone },
-    encoding: "utf8",
-  });
-  expect(result.status).toBe(0);
-  expect(result.stderr).toBe("");
-  return result.stdout;
+  return sampleInChild("formatted", timezone);
 }
 
 type Runtime = {

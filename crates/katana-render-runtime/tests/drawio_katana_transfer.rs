@@ -1,23 +1,18 @@
 use katana_render_runtime::markdown::color_preset::DiagramColorPreset;
-use katana_render_runtime::markdown::drawio_renderer::DrawioRendererOps;
+use katana_render_runtime::markdown::drawio_renderer::{DRAWIO_JS_CHECKSUM, DrawioRendererOps};
 use katana_render_runtime::markdown::{DiagramBlock, DiagramKind, DiagramResult};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+#[path = "support/katana_transfer.rs"]
+mod katana_transfer;
+use katana_transfer::{TestResult, env_guard, missing_runtime_path, test_error};
+#[path = "support/katana_env_override.rs"]
+mod katana_env_override;
+use katana_env_override::EnvOverride;
+#[path = "support/drawio_fixture.rs"]
+mod drawio_fixture;
+use drawio_fixture::SIMPLE_DRAWIO_XML;
+use sha2::{Digest, Sha256};
 use std::thread;
-
-type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
-static ENV_LOCK: Mutex<()> = Mutex::new(());
-const SIMPLE_DRAWIO_XML: &str = r#"<mxfile><diagram name="test"><mxGraphModel><root>
-<mxCell id="0"/>
-<mxCell id="1" parent="0"/>
-<mxCell id="2" value="Box A" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-    <mxGeometry x="80" y="80" width="120" height="60" as="geometry"/>
-</mxCell>
-<mxCell id="3" value="Box B" vertex="1" parent="1">
-    <mxGeometry x="280" y="80" width="120" height="60" as="geometry"/>
-</mxCell>
-</root></mxGraphModel></diagram></mxfile>"#;
 
 #[test]
 fn returns_not_installed_without_drawio_js() -> TestResult<()> {
@@ -58,12 +53,12 @@ fn resolve_drawio_js_prefers_env_var() -> TestResult<()> {
 }
 
 #[test]
-fn fake_drawio_js_does_not_fallback_to_native_svg() -> TestResult<()> {
-    let fake_runtime = FakeRuntimeFile::create_invalid()?;
+fn invalid_drawio_javascript_does_not_fallback_to_native_svg() -> TestResult<()> {
+    let invalid_runtime = InvalidRuntimeFile::create()?;
 
     let result = DrawioRendererOps::render_drawio_with_runtime_path(
         &drawio_block(SIMPLE_DRAWIO_XML),
-        fake_runtime.path(),
+        invalid_runtime.path(),
         DiagramColorPreset::current(),
     );
 
@@ -72,19 +67,29 @@ fn fake_drawio_js_does_not_fallback_to_native_svg() -> TestResult<()> {
 }
 
 #[test]
-fn fake_drawio_js_can_render_svg_without_official_runtime() -> TestResult<()> {
-    let fake_runtime = FakeRuntimeFile::create_success()?;
+fn packaged_drawio_runtime_renders_svg() -> TestResult<()> {
+    let _guard = env_guard()?;
+    let drawio_js = DrawioRendererOps::find_drawio_js()
+        .map_err(std::io::Error::other)?
+        .ok_or_else(|| test_error("Packaged Draw.io runtime is unavailable"))?;
+    let runtime_bytes = std::fs::read(&drawio_js)?;
+    let runtime_checksum = Sha256::digest(&runtime_bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    assert_eq!(runtime_checksum, DRAWIO_JS_CHECKSUM);
 
     let result = DrawioRendererOps::render_drawio_with_runtime_path(
         &drawio_block(SIMPLE_DRAWIO_XML),
-        fake_runtime.path(),
+        &drawio_js,
         DiagramColorPreset::current(),
     );
 
     let DiagramResult::Ok(svg) = result else {
-        return Err(test_error("Expected fake Draw.io runtime to return SVG"));
+        return Err(test_error(format!("Expected Draw.io SVG, got {result:?}")));
     };
-    assert!(svg.contains("drawio"));
+    assert!(svg.contains("<svg"));
+    assert!(svg.contains("Box A"));
     Ok(())
 }
 
@@ -123,50 +128,19 @@ fn drawio_block(source: &str) -> DiagramBlock {
     }
 }
 
-fn missing_runtime_path(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("kdr-{name}-missing-{}.js", std::process::id()))
-}
+const INVALID_DRAWIO_JAVASCRIPT: &str = "function (";
 
-fn env_guard() -> TestResult<MutexGuard<'static, ()>> {
-    ENV_LOCK
-        .lock()
-        .map_err(|error| test_error(format!("environment lock is poisoned: {error}")))
-}
-
-struct EnvOverride {
-    key: &'static str,
-}
-
-impl EnvOverride {
-    fn set(key: &'static str, value: &Path) -> Self {
-        unsafe { std::env::set_var(key, value) };
-        Self { key }
-    }
-}
-
-impl Drop for EnvOverride {
-    fn drop(&mut self) {
-        unsafe { std::env::remove_var(self.key) };
-    }
-}
-
-struct FakeRuntimeFile {
+struct InvalidRuntimeFile {
     path: PathBuf,
 }
 
-impl FakeRuntimeFile {
-    fn create_invalid() -> Result<Self, std::io::Error> {
-        Self::create_with("invalid", "window.GraphViewer = {};")
-    }
-
-    fn create_success() -> Result<Self, std::io::Error> {
-        Self::create_with("success", fake_success_runtime())
-    }
-
-    fn create_with(label: &str, source: &str) -> Result<Self, std::io::Error> {
-        let path =
-            std::env::temp_dir().join(format!("kdr-drawio-fake-{label}-{}.js", std::process::id()));
-        std::fs::write(&path, source)?;
+impl InvalidRuntimeFile {
+    fn create() -> Result<Self, std::io::Error> {
+        let path = std::env::temp_dir().join(format!(
+            "kdr-drawio-invalid-runtime-{}.js",
+            std::process::id()
+        ));
+        std::fs::write(&path, INVALID_DRAWIO_JAVASCRIPT)?;
         Ok(Self { path })
     }
 
@@ -175,29 +149,8 @@ impl FakeRuntimeFile {
     }
 }
 
-impl Drop for FakeRuntimeFile {
+impl Drop for InvalidRuntimeFile {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
     }
-}
-
-fn test_error(message: impl Into<String>) -> Box<dyn std::error::Error + Send + Sync> {
-    Box::new(std::io::Error::other(message.into()))
-}
-
-fn fake_success_runtime() -> &'static str {
-    r#"
-function Graph() {}
-const Editor = { convertHtmlToText(value) { return String(value); } };
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  [["width", "20"], ["height", "10"], ["viewBox", "0 0 20 10"]]
-    .forEach(([name, value]) => svg.setAttribute(name, value));
-  const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-  text.textContent = "drawio";
-  svg.appendChild(text);
-  callback({ graph: { getSvg() { return svg; } } });
-};
-"#
 }

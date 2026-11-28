@@ -9,44 +9,57 @@ mod filesystem_policy;
 mod glyph_cache;
 #[path = "svg_rasterize_text_stamp_batch.rs"]
 mod stamp_batch;
+#[cfg(target_os = "macos")]
+pub(in crate::markdown::svg_rasterize) use file_generation::{
+    FileStamp, observe_path_stamp, stamp_open_font_file, stamp_path_uncached,
+};
 pub(super) use file_generation::{
     FontSourceGeneration, font_source_generation, font_source_generation_uncached,
     observe_file_face_generation,
 };
 pub(super) use glyph_cache::cached_font_has_char_with_generation;
-pub(super) use stamp_batch::{memo_usable, with_validated_stamp_batch};
+#[cfg(windows)]
+pub(super) use stamp_batch::{enable_windows_font_snapshots, windows_font_snapshot};
+pub(super) use stamp_batch::{memo_usable, with_reusable_stamp_batch, with_validated_stamp_batch};
+
+pub(super) fn with_render_scoped_stamp_batch<T>(operation: impl FnMut() -> T) -> T {
+    stamp_batch::with_render_scoped_stamp_batch(operation)
+}
 #[cfg(test)]
 pub(super) fn file_stamp_durable_reusable(path: &std::path::Path) -> bool {
     file_generation::stamp_path_uncached(path).is_ok_and(|stamp| stamp.durable_reusable())
 }
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_text_font_platform_fallback.rs"]
+pub(super) mod platform_fallback;
 #[path = "svg_rasterize_text_font_score.rs"]
 mod score;
 use resvg::usvg;
 use score::fallback_face_attribute_score;
 #[cfg(test)]
 use score::{css_stretch_match_rank, css_style_match_rank, fallback_attribute_score};
-pub(super) fn matching_font_face(
-    database: &usvg::fontdb::Database,
-    font_family: &str,
-    font_weight: u16,
-    italic: bool,
-) -> Option<usvg::fontdb::ID> {
-    let names = css_font_family_names(font_family);
-    let families = names
-        .iter()
-        .map(|name| fontdb_family(name))
-        .collect::<Vec<_>>();
-    database.query(&usvg::fontdb::Query {
-        families: &families,
-        weight: usvg::fontdb::Weight(font_weight),
-        stretch: usvg::fontdb::Stretch::Normal,
-        style: if italic {
-            usvg::fontdb::Style::Italic
-        } else {
-            usvg::fontdb::Style::Normal
-        },
-    })
+#[derive(Clone, Copy)]
+struct FallbackAttributes {
+    weight: u16,
+    style: usvg::fontdb::Style,
+    stretch: usvg::fontdb::Stretch,
 }
+
+fn fallback_attributes(weight: u16, italic: bool) -> FallbackAttributes {
+    FallbackAttributes {
+        weight,
+        style: requested_font_style(italic),
+        stretch: usvg::fontdb::Stretch::Normal,
+    }
+}
+#[path = "svg_rasterize_text_font_family.rs"]
+mod family;
+#[cfg(any(test, target_os = "macos"))]
+pub(super) use family::css_font_family_names;
+#[cfg(test)]
+pub(super) use family::fontdb_family;
+pub(super) use family::matching_font_face;
+
 #[cfg(test)]
 pub(super) fn font_runs(
     database: &usvg::fontdb::Database,
@@ -116,47 +129,44 @@ pub(super) fn matching_fallback_with_probe(
     requested_italic: bool,
     probe: impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
 ) -> (Option<usvg::fontdb::ID>, bool) {
-    if database.face(base_face_id).is_none() {
-        return (None, false);
-    }
-    scan_fallback_faces(
+    #[cfg(target_os = "macos")]
+    return matching_fallback_macos(
         database,
         base_face_id,
         character,
-        requested_font_style(requested_italic),
-        usvg::fontdb::Weight(requested_weight),
+        requested_weight,
+        requested_italic,
+        probe,
+    );
+    #[cfg(not(target_os = "macos"))]
+    matching_fallback_nonmacos(
+        database,
+        base_face_id,
+        character,
+        requested_weight,
+        requested_italic,
         probe,
     )
 }
 
-fn scan_fallback_faces(
-    database: &usvg::fontdb::Database,
-    base_face_id: usvg::fontdb::ID,
-    character: char,
-    requested_style: usvg::fontdb::Style,
-    requested_weight: usvg::fontdb::Weight,
-    mut probe: impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
-) -> (Option<usvg::fontdb::ID>, bool) {
-    let mut best = None;
-    let mut cacheable = true;
-    for face in database.faces().filter(|face| face.id != base_face_id) {
-        let score = fallback_face_attribute_score(face, requested_style, requested_weight);
-        /* WHY: 同点では先のfaceを保ち、選択結果を改善しないfontのfile解析を省く。 */
-        if best.is_some_and(|(best_score, _)| score >= best_score) {
-            continue;
-        }
-        let support = probe(face.id, character);
-        cacheable &= support.is_some();
-        if support == Some(true) {
-            /* WHY: 全属性一致の最小scoreより良い候補はないため、後続faceの走査を省く。 */
-            if score == (0, 0, 0, 0) {
-                return (Some(face.id), cacheable);
-            }
-            best = Some((score, face.id));
-        }
-    }
-    (best.map(|(_, face_id)| face_id), cacheable)
-}
+#[path = "svg_rasterize_text_font_requested.rs"]
+mod requested;
+pub(super) use requested::matching_fallback_with_request;
+#[cfg(test)]
+use requested::requested_preflight;
+
+#[path = "svg_rasterize_text_font_fallback.rs"]
+mod fallback;
+#[cfg(not(target_os = "macos"))]
+use fallback::matching_fallback_nonmacos;
+use fallback::matching_fallback_regular;
+#[cfg(target_os = "macos")]
+use fallback::{AliasProbe, matching_fallback_macos, system_ui_bold_alias};
+
+#[path = "svg_rasterize_text_font_scan.rs"]
+mod scan;
+use scan::scan_fallback_faces;
+
 fn requested_font_style(italic: bool) -> usvg::fontdb::Style {
     if italic {
         usvg::fontdb::Style::Italic
@@ -172,38 +182,19 @@ pub(super) fn font_has_char(
 ) -> bool {
     probe_font_has_char(database, face_id, character).unwrap_or(false)
 }
-fn probe_font_has_char(
-    database: &usvg::fontdb::Database,
-    face_id: usvg::fontdb::ID,
-    character: char,
-) -> Option<bool> {
-    database
-        .with_face_data(face_id, |data, face_index| {
-            /* WHY: glyphの有無だけを調べるため、不要なGSUB/GPOS coverage構築を省く。 */
-            rustybuzz::ttf_parser::Face::parse(data, face_index)
-                .ok()
-                .map(|face| face.glyph_index(character).is_some())
-        })
-        .flatten()
-}
-fn css_font_family_names(value: &str) -> Vec<String> {
-    value
-        .split(',')
-        .map(str::trim)
-        .map(|name| name.trim_matches(['\'', '"']).to_string())
-        .filter(|name| !name.is_empty())
-        .collect()
-}
-pub(super) fn fontdb_family(name: &str) -> usvg::fontdb::Family<'_> {
-    match name.to_ascii_lowercase().as_str() {
-        "serif" => usvg::fontdb::Family::Serif,
-        "sans-serif" | "system-ui" => usvg::fontdb::Family::SansSerif,
-        "cursive" => usvg::fontdb::Family::Cursive,
-        "fantasy" => usvg::fontdb::Family::Fantasy,
-        "monospace" => usvg::fontdb::Family::Monospace,
-        _ => usvg::fontdb::Family::Name(name),
-    }
-}
+#[path = "svg_rasterize_text_font_face_data.rs"]
+mod face_data;
+use face_data::probe_font_has_char;
+pub(super) use face_data::with_layout_font_face_data;
+#[cfg(test)]
+#[path = "svg_rasterize_text_font_db_token_tests.rs"]
+mod db_token_tests;
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_text_font_interface_bold_tests.rs"]
+mod interface_bold_tests;
+#[cfg(test)]
+#[path = "svg_rasterize_text_font_requested_tests.rs"]
+mod requested_tests;
 
 #[cfg(test)]
 mod tests {
@@ -211,10 +202,23 @@ mod tests {
         css_stretch_match_rank, css_style_match_rank, fallback_attribute_score, font_has_char,
         matching_fallback_face, matching_font_face,
     };
+    #[cfg(not(target_os = "macos"))]
+    use crate::markdown::svg_rasterize::font::platform::{PlatformFontStrategy, font_platform};
     use crate::markdown::svg_rasterize::font::{bundled_font_db, html_font_db_for_text};
     use resvg::usvg;
     use resvg::usvg::fontdb::{Database, ID, Source, Stretch, Style, Weight};
     use std::sync::Arc;
+
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    #[test]
+    fn macos_system_aliases_query_the_system_font_family() {
+        for alias in ["system-ui", "-apple-system", "BlinkMacSystemFont"] {
+            assert!(matches!(
+                super::fontdb_family(alias),
+                usvg::fontdb::Family::Name("System Font")
+            ));
+        }
+    }
 
     fn shaping_face_has_char(database: &Database, face_id: ID, character: char) -> bool {
         database
@@ -223,6 +227,47 @@ mod tests {
                     .is_some_and(|face| face.glyph_index(character).is_some())
             })
             .unwrap_or(false)
+    }
+
+    #[test]
+    fn named_font_lookup_is_case_insensitive() -> Result<(), String> {
+        let database = bundled_font_db();
+        let face_id = super::matching_font_face(&database, "noto sans", 700, false)
+            .ok_or("bundled family must match case-insensitively")?;
+        assert!(
+            database.face(face_id).is_some_and(|face| face
+                .families
+                .iter()
+                .any(|(family, _)| family.eq_ignore_ascii_case("noto sans"))),
+            "the selected face must belong to Noto Sans"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn family_list_skips_empty_and_unavailable_names() -> Result<(), String> {
+        let database = bundled_font_db();
+        let names = "'', 'Unavailable Family', 'Noto Sans'";
+        assert_eq!(
+            super::css_font_family_names(names),
+            vec!["Unavailable Family", "Noto Sans"]
+        );
+        let expected = database
+            .faces()
+            .find(|face| {
+                face.weight == Weight::NORMAL
+                    && face.style == Style::Normal
+                    && face
+                        .families
+                        .iter()
+                        .any(|(family, _)| family == "Noto Sans")
+            })
+            .ok_or("bundled regular Noto Sans face must exist")?;
+        assert_eq!(
+            matching_font_face(&database, names, 400, false),
+            Some(expected.id)
+        );
+        Ok(())
     }
 
     fn full_scan_shaping_fallback(
@@ -255,6 +300,48 @@ mod tests {
             .map(|face| face.id)
     }
 
+    fn expected_html_cjk_fallback(
+        database: &Database,
+        base_face_id: ID,
+        character: char,
+        requested_weight: u16,
+        requested_italic: bool,
+    ) -> Option<ID> {
+        #[cfg(not(target_os = "macos"))]
+        {
+            let requested_style = if requested_italic {
+                Style::Italic
+            } else {
+                Style::Normal
+            };
+            if let Some(preferred) = font_platform()
+                .cjk_fallback_face(database, character, requested_weight, requested_style)
+                .filter(|id| *id != base_face_id)
+                .filter(|id| shaping_face_has_char(database, *id, character))
+            {
+                return Some(preferred);
+            }
+        }
+        full_scan_shaping_fallback(
+            database,
+            base_face_id,
+            character,
+            requested_weight,
+            requested_italic,
+        )
+    }
+
+    #[test]
+    fn html_cjk_fallback_oracle_uses_generic_scan_without_platform_candidate() -> Result<(), String>
+    {
+        let fixture = fallback_fixture()?;
+        assert_eq!(
+            expected_html_cjk_fallback(&fixture.database, fixture.base, '\u{10ffff}', 400, false),
+            full_scan_shaping_fallback(&fixture.database, fixture.base, '\u{10ffff}', 400, false)
+        );
+        Ok(())
+    }
+
     struct FallbackFixture {
         database: Database,
         base: ID,
@@ -273,7 +360,7 @@ mod tests {
             .ok_or("bundled face must exist".to_string())
     }
 
-    fn duplicate_sfnt_as_two_face_ttc(sfnt: &[u8]) -> Result<Vec<u8>, String> {
+    pub(super) fn duplicate_sfnt_as_two_face_ttc(sfnt: &[u8]) -> Result<Vec<u8>, String> {
         let table_count = sfnt_table_count(sfnt)?;
         let directory_end = table_count
             .checked_mul(16)
@@ -427,7 +514,7 @@ mod tests {
             assert!(font_has_char(database, fallback, '日'));
             assert_eq!(
                 Some(fallback),
-                full_scan_shaping_fallback(database, base, '日', weight, italic)
+                expected_html_cjk_fallback(database, base, '日', weight, italic)
             );
             for character in ['A', '日', '😀', '\u{10ffff}'] {
                 assert_eq!(

@@ -12,7 +12,7 @@ struct FontFile(std::path::PathBuf);
 impl FontFile {
     fn create() -> TestResult<Self> {
         let path = std::env::temp_dir().join(format!(
-            "krr-selector-{}-{}.ttf",
+            "krr-selector-generation-{}-{}.ttf",
             std::process::id(),
             NEXT_FILE.fetch_add(1, Ordering::Relaxed)
         ));
@@ -77,56 +77,7 @@ fn fallback_file_database(
 }
 
 fn font_without_a(font: &[u8]) -> TestResult<Vec<u8>> {
-    let (record, offset) = table_record(font, b"cmap")?;
-    let (_, head) = table_record(font, b"head")?;
-    let glyph = rustybuzz::ttf_parser::Face::parse(font, 0)
-        .map_err(|_| "font invalid")?
-        .glyph_index('B')
-        .ok_or("B glyph missing")?
-        .0;
-    let cmap = b_cmap(glyph);
-    let mut changed = font.to_vec();
-    changed[offset..offset + cmap.len()].copy_from_slice(&cmap);
-    changed[record + 4..record + 8].copy_from_slice(&sfnt_checksum(&cmap).to_be_bytes());
-    changed[record + 12..record + 16].copy_from_slice(&(cmap.len() as u32).to_be_bytes());
-    changed[head + 8..head + 12].fill(0);
-    let adjustment = 0xB1B0_AFBA_u32.wrapping_sub(sfnt_checksum(&changed));
-    changed[head + 8..head + 12].copy_from_slice(&adjustment.to_be_bytes());
-    Ok(changed)
-}
-
-fn table_record(font: &[u8], tag: &[u8; 4]) -> TestResult<(usize, usize)> {
-    let table_count = usize::from(u16::from_be_bytes([font[4], font[5]]));
-    for index in 0..table_count {
-        let record = 12 + index * 16;
-        let offset = u32::from_be_bytes(font[record + 8..record + 12].try_into()?) as usize;
-        if &font[record..record + 4] == tag {
-            return Ok((record, offset));
-        }
-    }
-    Err("font table missing".into())
-}
-
-fn b_cmap(glyph: u16) -> Vec<u8> {
-    let mut cmap = Vec::with_capacity(40);
-    cmap.extend_from_slice(&[0, 0, 0, 1, 0, 3, 0, 10, 0, 0, 0, 12]);
-    cmap.extend_from_slice(&12_u16.to_be_bytes());
-    cmap.extend_from_slice(&0_u16.to_be_bytes());
-    cmap.extend_from_slice(&28_u32.to_be_bytes());
-    cmap.extend_from_slice(&0_u32.to_be_bytes());
-    cmap.extend_from_slice(&1_u32.to_be_bytes());
-    cmap.extend_from_slice(&u32::from('B').to_be_bytes());
-    cmap.extend_from_slice(&u32::from('B').to_be_bytes());
-    cmap.extend_from_slice(&u32::from(glyph).to_be_bytes());
-    cmap
-}
-
-fn sfnt_checksum(bytes: &[u8]) -> u32 {
-    bytes.chunks(4).fold(0_u32, |sum, chunk| {
-        let mut word = [0; 4];
-        word[..chunk.len()].copy_from_slice(chunk);
-        sum.wrapping_add(u32::from_be_bytes(word))
-    })
+    super::super::super::fallback::font_with_only_b_cmap(font)
 }
 
 fn rewrite_same_generation(path: &std::path::Path, bytes: &[u8]) -> TestResult<()> {

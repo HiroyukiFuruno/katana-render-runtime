@@ -14,12 +14,21 @@ impl HtmlBrowserOrigin {
         let parsed = Url::parse(&value).map_err(|_| HtmlBrowserError::InvalidOrigin {
             origin: value.clone(),
         })?;
+        Self::validate_url(&parsed, &value)?;
+        Ok(Self(parsed))
+    }
+
+    fn validate_url(parsed: &Url, original: &str) -> Result<(), HtmlBrowserError> {
         match parsed.scheme() {
             "file" if parsed.to_file_path().is_ok() => {}
             "http" | "https" if parsed.host_str().is_some() => {}
-            _ => return Err(HtmlBrowserError::UnsupportedOriginScheme { origin: value }),
+            _ => {
+                return Err(HtmlBrowserError::UnsupportedOriginScheme {
+                    origin: original.to_owned(),
+                });
+            }
         }
-        Ok(Self(parsed))
+        Ok(())
     }
 
     pub fn as_str(&self) -> &str {
@@ -61,12 +70,7 @@ impl HtmlBrowserSource {
         origin: impl Into<String>,
     ) -> Result<Self, HtmlBrowserError> {
         let raw_html = raw_html.into();
-        if raw_html.len() > HTML_BROWSER_MAX_SOURCE_BYTES {
-            return Err(HtmlBrowserError::SourceTooLarge {
-                actual_bytes: raw_html.len(),
-                max_bytes: HTML_BROWSER_MAX_SOURCE_BYTES,
-            });
-        }
+        Self::validate_size(&raw_html)?;
         Ok(Self {
             raw_html,
             origin: HtmlBrowserOrigin::parse(origin)?,
@@ -74,7 +78,18 @@ impl HtmlBrowserSource {
     }
 
     pub fn validate(&self) -> Result<(), HtmlBrowserError> {
-        Self::new(self.raw_html.clone(), self.origin.as_str()).map(|_| ())
+        Self::validate_size(&self.raw_html)?;
+        HtmlBrowserOrigin::validate_url(&self.origin.0, self.origin.as_str())
+    }
+
+    fn validate_size(raw_html: &str) -> Result<(), HtmlBrowserError> {
+        if raw_html.len() > HTML_BROWSER_MAX_SOURCE_BYTES {
+            return Err(HtmlBrowserError::SourceTooLarge {
+                actual_bytes: raw_html.len(),
+                max_bytes: HTML_BROWSER_MAX_SOURCE_BYTES,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -119,6 +134,8 @@ impl HtmlBrowserViewport {
     }
 }
 
+/// ポインターのviewport座標とスクロール差分は物理pixelで渡す。
+/// 内部でdevice scale factorで割り、返却されるスクロールmetricsはCSS pixel単位となる。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HtmlBrowserInput {

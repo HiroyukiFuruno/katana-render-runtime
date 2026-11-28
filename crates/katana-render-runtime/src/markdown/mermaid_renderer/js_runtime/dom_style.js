@@ -1,8 +1,10 @@
 function katanaStyleCamelName(name) {
+  if (String(name).startsWith("--")) return String(name);
   return String(name).replace(/-([a-z])/g, (_match, char) => char.toUpperCase());
 }
 
 function katanaStyleKebabName(name) {
+  if (String(name).startsWith("--")) return String(name);
   return String(name).replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`);
 }
 
@@ -13,13 +15,12 @@ function katanaApplyCssText(style, value) {
 }
 
 function katanaCssEntries(value) {
-  return String(value ?? "").split(";");
+  return globalThis.katanaParseCssDeclarations(String(value ?? ""));
 }
 
 function katanaApplyCssEntry(style, entry) {
-  const separator = entry.indexOf(":");
-  if (separator < 0) return;
-  style.setProperty(entry.slice(0, separator).trim(), entry.slice(separator + 1).trim());
+  if (style.getPropertyPriority(entry.name) === "important" && !entry.priority) return;
+  style.setProperty(entry.name, entry.value, entry.priority);
 }
 
 [
@@ -71,21 +72,52 @@ function katanaInstallStyleDirectProperty(camel) {
   });
 }
 
-KatanaStyle.prototype.setProperty = function setProperty(name, value) {
+KatanaStyle.prototype.setProperty = function setProperty(name, value, priority = "") {
   const kebab = katanaStyleKebabName(name);
   const camel = katanaStyleCamelName(name);
+  const normalizedPriority = String(priority).toLowerCase();
+  if (value === null || value === undefined || String(value) === "") {
+    this.removeProperty(name);
+    return;
+  }
+  if (normalizedPriority !== "" && normalizedPriority !== "important") return;
+  if (kebab === "font-family") {
+    const family = String(value);
+    const references = globalThis.katanaCssVariableReferences(family);
+    if (
+      references === undefined ||
+      (references.length === 0 && !globalThis.katanaValidCssFontFamily(family))
+    )
+      return;
+  }
+  this.priorities ??= {};
+  this.priorities[kebab] = normalizedPriority;
   this.values[kebab] = String(value);
   this.values[camel] = String(value);
   if (!Object.getOwnPropertyDescriptor(KatanaStyle.prototype, camel)) {
     this[camel] = String(value);
   }
+  katanaSyncOwnerStyleAttribute(this, true);
+};
+
+KatanaStyle.prototype.getPropertyPriority = function getPropertyPriority(name) {
+  return this.priorities?.[katanaStyleKebabName(name)] ?? "";
+};
+
+KatanaStyle.prototype.clone = function clone() {
+  const cloned = new KatanaStyle();
+  cloned.values = { ...this.values };
+  cloned.priorities = { ...this.priorities };
+  return cloned;
 };
 
 KatanaStyle.prototype.getPropertyValue = function getPropertyValue(name) {
   const key = String(name);
   const kebab = katanaStyleKebabName(key);
   const camel = katanaStyleCamelName(key);
-  return this.values[key] ?? this.values[kebab] ?? this.values[camel] ?? katanaStyleOwnValue(this, camel);
+  return (
+    this.values[key] ?? this.values[kebab] ?? this.values[camel] ?? katanaStyleOwnValue(this, camel)
+  );
 };
 
 function katanaStyleOwnValue(style, camel) {
@@ -93,41 +125,82 @@ function katanaStyleOwnValue(style, camel) {
 }
 
 KatanaStyle.prototype.removeProperty = function removeProperty(name) {
+  const hadProperty = katanaStyleHasProperty(this, name);
   const value = this.getPropertyValue(name);
+  if (!hadProperty) return value;
   delete this.values[String(name)];
   delete this.values[katanaStyleKebabName(name)];
   delete this.values[katanaStyleCamelName(name)];
+  if (this.priorities) delete this.priorities[katanaStyleKebabName(name)];
   delete this[katanaStyleCamelName(name)];
+  katanaSyncOwnerStyleAttribute(this, false);
   return value;
 };
 
 Object.defineProperty(KatanaStyle.prototype, "cssText", {
   get() {
     return Object.entries(this.values)
-      .filter(([key]) => !/[A-Z]/.test(key))
-      .map(([key, value]) => `${key}: ${value}`)
+      .filter(([key]) => key.startsWith("--") || !/[A-Z]/.test(key))
+      .map(
+        ([key, value]) => `${key}: ${value}${this.getPropertyPriority(key) ? " !important" : ""}`,
+      )
       .join("; ");
   },
   set(value) {
-    this.values = {};
-    katanaApplyCssText(this, value);
+    katanaReplaceStyleCssText(this, value, true);
   },
 });
 
 Object.defineProperty(KatanaStyle.prototype, "length", {
   get() {
-    return Object.keys(this.values).filter((key) => !/[A-Z]/.test(key)).length;
+    return Object.keys(this.values).filter((key) => key.startsWith("--") || !/[A-Z]/.test(key))
+      .length;
   },
 });
 
 KatanaStyle.prototype.item = function item(index) {
-  return Object.keys(this.values).filter((key) => !/[A-Z]/.test(key))[Number(index)] ?? "";
+  return (
+    Object.keys(this.values).filter((key) => key.startsWith("--") || !/[A-Z]/.test(key))[
+      Number(index)
+    ] ?? ""
+  );
 };
 
 const katanaSetAttributeBase = KatanaNode.prototype.setAttribute;
+function katanaSyncOwnerStyleAttribute(style, createAttribute) {
+  const owner = style.ownerNode;
+  if (style.suppressOwnerSync || !owner || (!createAttribute && !owner.hasAttribute("style")))
+    return;
+  katanaSetAttributeBase.call(owner, "style", style.cssText);
+}
+
+function katanaReplaceStyleCssText(style, value, reflectOwner) {
+  const previousSuppression = style.suppressOwnerSync === true;
+  style.suppressOwnerSync = true;
+  try {
+    for (const key of Object.keys(style.values)) style.removeProperty(key);
+    style.values = {};
+    style.priorities = {};
+    katanaApplyCssText(style, value);
+  } finally {
+    style.suppressOwnerSync = previousSuppression;
+  }
+  if (reflectOwner) katanaSyncOwnerStyleAttribute(style, true);
+}
+
 KatanaNode.prototype.setAttribute = function setAttribute(name, value) {
   katanaSetAttributeBase.call(this, name, value);
   if (String(name).toLowerCase() === "style") {
-    this.style.cssText = value;
+    katanaReplaceStyleCssText(this.style, value, false);
   }
 };
+
+function katanaStyleHasProperty(style, name) {
+  const key = String(name);
+  const camel = katanaStyleCamelName(key);
+  return (
+    [key, katanaStyleKebabName(key), camel].some((candidate) =>
+      Object.hasOwn(style.values, candidate),
+    ) || Object.hasOwn(style, camel)
+  );
+}

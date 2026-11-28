@@ -1,25 +1,74 @@
 import path from "node:path";
 import { DiagramTheme, type DiagramThemeName } from "./diagram_theme";
+import {
+  assertReferenceScope,
+  type OfficialReferenceMode,
+  referenceMode,
+} from "./official-reference-mode";
 
 export interface CliParsedOptions {
   officialDir: string;
   katanaDir: string;
+  katanaSvgDir?: string;
   outputDir: string;
   katanaCrop: CropRect | null;
   baselineScoresPath: string | null;
   minScore: number;
   theme: DiagramThemeName;
+  fixturesDir?: string;
+  fixtureGlob?: string;
+  referenceMode?: OfficialReferenceMode;
+  referenceScope?: "formal" | "diagnostic";
+  rasterBindingConfigPath?: string;
+  rasterBindingConfigSha256?: string;
 }
 
 export const CliOptions = {
   parse(argv: string[]): CliParsedOptions {
+    const mode = referenceMode(CliOptions.get(argv, "--reference-mode", "strictVendorOriginal"));
+    const scopeValue = CliOptions.get(argv, "--reference-scope", "formal");
+    if (scopeValue !== "formal" && scopeValue !== "diagnostic") {
+      throw new Error(`Unsupported reference scope: ${scopeValue}`);
+    }
+    assertReferenceScope(mode, scopeValue);
+    const rasterBindingConfigPath = CliOptions.getOptionalPath(argv, "--raster-binding-config");
+    const rasterBindingConfigSha256 = CliOptions.getOptionalValue(
+      argv,
+      "--raster-binding-config-sha",
+    );
+    if ((rasterBindingConfigPath === null) !== (rasterBindingConfigSha256 === undefined)) {
+      throw new Error(
+        "Raster comparison config and externally pinned SHA must be supplied together",
+      );
+    }
+    if (
+      rasterBindingConfigPath !== null &&
+      (!path.isAbsolute(rasterBindingConfigPath) ||
+        path.resolve(rasterBindingConfigPath) !== rasterBindingConfigPath ||
+        !/^[0-9a-f]{64}$/.test(rasterBindingConfigSha256 ?? ""))
+    ) {
+      throw new Error("Absolute raster comparison config and SHA256 required");
+    }
+    if (mode === "strictVendorOriginal" && rasterBindingConfigPath === null) {
+      throw new Error("Strict comparison requires externally pinned raster production bindings");
+    }
+    const katanaDir = path.resolve(
+      CliOptions.get(argv, "--katana", "tmp/mermaid-parts-en-dark-katana-browser"),
+    );
     return {
       officialDir: path.resolve(
         CliOptions.get(argv, "--official", "tmp/mermaid-parts-en-dark-official-browser"),
       ),
-      katanaDir: path.resolve(
-        CliOptions.get(argv, "--katana", "tmp/mermaid-parts-en-dark-katana-browser"),
-      ),
+      katanaDir,
+      katanaSvgDir: path.resolve(CliOptions.get(argv, "--katana-svg-dir", katanaDir)),
+      ...(CliOptions.getOptionalPath(argv, "--fixtures-dir") === null
+        ? {}
+        : {
+            fixturesDir: path.resolve(CliOptions.getOptionalPath(argv, "--fixtures-dir") as string),
+          }),
+      ...(CliOptions.getOptionalValue(argv, "--fixture-glob") === undefined
+        ? {}
+        : { fixtureGlob: CliOptions.getOptionalValue(argv, "--fixture-glob") as string }),
       outputDir: path.resolve(
         CliOptions.get(argv, "--output", "tmp/mermaid-parts-en-dark-comparison"),
       ),
@@ -27,6 +76,14 @@ export const CliOptions = {
       baselineScoresPath: CliOptions.getOptionalPath(argv, "--baseline"),
       minScore: CliOptions.number(argv, "--min-score", 99),
       theme: DiagramTheme.parse(CliOptions.get(argv, "--theme", "dark")).name,
+      referenceMode: mode,
+      referenceScope: scopeValue,
+      ...(rasterBindingConfigPath === null
+        ? {}
+        : {
+            rasterBindingConfigPath,
+            rasterBindingConfigSha256: rasterBindingConfigSha256 as string,
+          }),
     };
   },
 
@@ -37,6 +94,10 @@ export const CliOptions = {
 
   getOptionalPath(argv: string[], name: string): string | null {
     return CliOptions.getValue(argv, name);
+  },
+
+  getOptionalValue(argv: string[], name: string): string | undefined {
+    return CliOptions.getValue(argv, name) ?? undefined;
   },
 
   getValue(argv: string[], name: string): string | null {

@@ -3,6 +3,14 @@ use resvg::usvg::fontdb::{Database, ID, Source};
 use std::sync::Arc;
 
 pub(super) fn has_char(database: &Arc<Database>, face_id: ID, character: char) -> Result<bool, ()> {
+    #[cfg(windows)]
+    if database
+        .face(face_id)
+        .is_some_and(|face| matches!(&face.source, Source::SharedFile(_, _)))
+    {
+        /* WHY: 一時共有したFileは従来のフォールバック順位を保ち、字形取得だけ共有する。 */
+        return Err(());
+    }
     let Some((Source::File(_), face_index)) = database.face_source(face_id) else {
         return stock_probe(database, face_id, character);
     };
@@ -94,7 +102,11 @@ fn validate_file_generation(
     Ok(())
 }
 
-fn stock_probe(database: &Arc<Database>, face_id: ID, character: char) -> Result<bool, ()> {
+pub(super) fn stock_probe(
+    database: &Arc<Database>,
+    face_id: ID,
+    character: char,
+) -> Result<bool, ()> {
     Ok(database
         .with_face_data(face_id, |data, index| {
             let font = skrifa::FontRef::from_index(data, index).ok()?;

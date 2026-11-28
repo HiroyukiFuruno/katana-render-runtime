@@ -1,22 +1,13 @@
 use katana_render_runtime::markdown::color_preset::DiagramColorPreset;
 use katana_render_runtime::markdown::drawio_renderer::DrawioRendererOps;
 use katana_render_runtime::markdown::{DiagramBlock, DiagramKind, DiagramResult};
-use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
+#[path = "support/katana_transfer.rs"]
+mod katana_transfer;
+use katana_transfer::{TestResult, env_guard, missing_runtime_path, test_error};
+#[path = "support/drawio_fixture.rs"]
+mod drawio_fixture;
+use drawio_fixture::SIMPLE_DRAWIO_XML;
 
-type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
-static ENV_LOCK: Mutex<()> = Mutex::new(());
-const SIMPLE_DRAWIO_XML: &str = r#"<mxfile><diagram name="test"><mxGraphModel><root>
-<mxCell id="0"/>
-<mxCell id="1" parent="0"/>
-<mxCell id="2" value="Box A" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-    <mxGeometry x="80" y="80" width="120" height="60" as="geometry"/>
-</mxCell>
-<mxCell id="3" value="Box B" vertex="1" parent="1">
-    <mxGeometry x="280" y="80" width="120" height="60" as="geometry"/>
-</mxCell>
-</root></mxGraphModel></diagram></mxfile>"#;
 const COMPRESSED_DRAWIO_XML: &str = r#"<mxfile><diagram name="compressed">hVFBDsIgEHwN57ZgfEDR9OTJFxDZFBIoBKilv5fKqtGk8bAJMzsz2V0I4zYPQXh1cRIMYWfCeHAu1ZfNHIwhtNWSsBOhtC3V7PS6UgV6EWBK/+W0yu/CzFAZ7qwPECPIwvcuV0FMq0FBcPMkYfN3hPWL0gmuXty27lJ2KJxK1mAb4yEkyLsDPimcbwBnIYW1SNBwaKtj/YaLlkmhnyKnQI8KQ4/IiVjx+A5+HaPBa1TwuXfz8xkP</diagram></mxfile>"#;
 const IMAGE_DRAWIO_XML: &str = r#"<mxGraphModel><root>
 <mxCell id="0"/>
@@ -93,10 +84,6 @@ fn render_with_official_drawio_js(source: &str) -> TestResult<DiagramResult> {
     ))
 }
 
-fn missing_runtime_path(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("kdr-{name}-missing-{}.js", std::process::id()))
-}
-
 fn drawio_block(source: &str) -> DiagramBlock {
     DiagramBlock {
         kind: DiagramKind::DrawIo,
@@ -109,14 +96,4 @@ fn expect_drawio_svg(result: DiagramResult) -> TestResult<String> {
         DiagramResult::Ok(svg) => Ok(svg),
         other => Err(test_error(format!("Expected Draw.io SVG, got {other:?}"))),
     }
-}
-
-fn env_guard() -> TestResult<MutexGuard<'static, ()>> {
-    ENV_LOCK
-        .lock()
-        .map_err(|error| test_error(format!("environment lock is poisoned: {error}")))
-}
-
-fn test_error(message: impl Into<String>) -> Box<dyn std::error::Error + Send + Sync> {
-    Box::new(std::io::Error::other(message.into()))
 }

@@ -3,28 +3,34 @@ use super::*;
 use resvg::usvg::fontdb::{Database, ID, Source};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-struct FontDirectory(std::path::PathBuf);
+const FILE_PATH_COUNT: usize = 257;
+const SFNT_TABLE_COUNT_OFFSET: usize = 4;
+const SFNT_TABLE_COUNT_LOW_OFFSET: usize = 5;
+const TTC_HEADER_SIZE: usize = 20;
+const TTC_FACE_COUNT: u32 = 2;
+const SFNT_TABLE_DIRECTORY_OFFSET: usize = 12;
+const SFNT_TABLE_RECORD_SIZE: usize = 16;
+const SFNT_TABLE_OFFSET_FIELD: usize = 8;
+const SFNT_OFFSET_BYTE_WIDTH: usize = 4;
+
+struct FontDirectory {
+    root: std::path::PathBuf,
+    _owner: tempfile::TempDir,
+}
 
 impl FontDirectory {
     fn create() -> TestResult<Self> {
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "krr-selector-boundary-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir(&path)?;
-        Ok(Self(path))
+        let owner = tempfile::Builder::new()
+            .prefix("krr-selector-boundary-")
+            .tempdir()?;
+        Ok(Self {
+            root: owner.path().to_path_buf(),
+            _owner: owner,
+        })
     }
 
     fn font_path(&self, index: usize) -> std::path::PathBuf {
-        self.0.join(format!("font-{index}.ttf"))
-    }
-}
-
-impl Drop for FontDirectory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        self.root.join(format!("font-{index}.ttf"))
     }
 }
 
@@ -35,7 +41,7 @@ fn database_with_257_file_paths(
     std::fs::write(&first_path, FONT)?;
     let mut database = Database::new();
     database.load_font_source(Source::File(first_path.clone()));
-    for index in 1..257 {
+    for index in 1..FILE_PATH_COUNT {
         let path = directory.font_path(index);
         std::fs::hard_link(&first_path, &path)?;
         database.load_font_source(Source::File(path));
@@ -87,7 +93,7 @@ fn two_hundred_fifty_seven_paths_retry_durable_parse_and_keep_weak_parse_uncache
 {
     let directory = FontDirectory::create()?;
     let (first_path, database) = database_with_257_file_paths(&directory)?;
-    assert_eq!(database.faces().count(), 257);
+    assert_eq!(database.faces().count(), FILE_PATH_COUNT);
     let file_is_durable =
         super::super::super::super::font::file_stamp_durable_reusable(&first_path);
     let expected_attempts = if file_is_durable { 2 } else { 1 };
@@ -110,15 +116,18 @@ fn two_hundred_fifty_seven_paths_retry_durable_parse_and_keep_weak_parse_uncache
 }
 
 fn duplicate_sfnt_as_two_face_ttc(sfnt: &[u8]) -> TestResult<Vec<u8>> {
-    let table_count = u16::from_be_bytes([sfnt[4], sfnt[5]]) as usize;
-    let second_offset = 20 + sfnt.len();
+    let table_count = u16::from_be_bytes([
+        sfnt[SFNT_TABLE_COUNT_OFFSET],
+        sfnt[SFNT_TABLE_COUNT_LOW_OFFSET],
+    ]) as usize;
+    let second_offset = TTC_HEADER_SIZE + sfnt.len();
     let mut ttc = Vec::with_capacity(second_offset + sfnt.len());
     ttc.extend_from_slice(b"ttcf");
     ttc.extend_from_slice(&[0, 1, 0, 0]);
-    ttc.extend_from_slice(&2_u32.to_be_bytes());
-    ttc.extend_from_slice(&20_u32.to_be_bytes());
+    ttc.extend_from_slice(&TTC_FACE_COUNT.to_be_bytes());
+    ttc.extend_from_slice(&(TTC_HEADER_SIZE as u32).to_be_bytes());
     ttc.extend_from_slice(&(second_offset as u32).to_be_bytes());
-    append_sfnt_face(&mut ttc, sfnt, table_count, 20)?;
+    append_sfnt_face(&mut ttc, sfnt, table_count, TTC_HEADER_SIZE)?;
     append_sfnt_face(&mut ttc, sfnt, table_count, second_offset)?;
     Ok(ttc)
 }
@@ -132,13 +141,16 @@ fn append_sfnt_face(
     let start = ttc.len();
     ttc.extend_from_slice(sfnt);
     for table in 0..table_count {
-        let offset_field = start + 12 + table * 16 + 8;
+        let offset_field = start
+            + SFNT_TABLE_DIRECTORY_OFFSET
+            + table * SFNT_TABLE_RECORD_SIZE
+            + SFNT_TABLE_OFFSET_FIELD;
         let old_offset = u32::from_be_bytes(
-            ttc.get(offset_field..offset_field + 4)
+            ttc.get(offset_field..offset_field + SFNT_OFFSET_BYTE_WIDTH)
                 .ok_or("malformed SFNT table directory")?
                 .try_into()?,
         );
-        ttc[offset_field..offset_field + 4]
+        ttc[offset_field..offset_field + SFNT_OFFSET_BYTE_WIDTH]
             .copy_from_slice(&(old_offset + file_offset as u32).to_be_bytes());
     }
     Ok(())
@@ -146,7 +158,7 @@ fn append_sfnt_face(
 
 fn two_face_file_database() -> TestResult<(FontDirectory, std::path::PathBuf, Arc<Database>)> {
     let directory = FontDirectory::create()?;
-    let path = directory.0.join("two-faces.ttc");
+    let path = directory.root.join("two-faces.ttc");
     std::fs::write(&path, duplicate_sfnt_as_two_face_ttc(FONT)?)?;
     let mut font_database = Database::new();
     font_database.load_font_source(Source::File(path.clone()));

@@ -92,13 +92,14 @@ fn completion_received(
     execution_remaining: Duration,
     host_io_remaining: Duration,
 ) -> bool {
-    wait_for_completion
-        .recv_timeout(
+    !matches!(
+        wait_for_completion.recv_timeout(
             Duration::from_millis(1)
                 .min(execution_remaining)
                 .min(host_io_remaining),
-        )
-        .is_ok()
+        ),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    )
 }
 
 fn account_elapsed_budget(
@@ -121,17 +122,58 @@ fn account_elapsed_budget(
 
 #[cfg(test)]
 mod tests {
-    use super::wait_for_timeout;
+    use super::{ExecutionBudget, HtmlRuntimeError, wait_for_timeout};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, mpsc};
     use std::time::Duration;
+
+    fn record_termination(terminated: Arc<AtomicBool>) -> impl Fn() + Send + 'static {
+        move || terminated.store(true, Ordering::SeqCst)
+    }
+
+    #[test]
+    fn watchdog_thread_failure_returns_execution_timeout() {
+        let (completion, receiver) = mpsc::channel();
+        let budget = ExecutionBudget {
+            completion,
+            timed_out: Arc::new(AtomicBool::new(false)),
+            timer: std::thread::spawn(move || {
+                let _ = receiver.recv();
+                std::panic::resume_unwind(Box::new("watchdog failure"));
+            }),
+        };
+
+        assert!(matches!(
+            budget.finish(),
+            Err(HtmlRuntimeError::ExecutionTimeout)
+        ));
+    }
+
+    #[test]
+    fn cancelled_owner_releases_watchdog_without_terminating_execution() {
+        let (owner, receiver) = mpsc::channel();
+        drop(owner);
+        let timed_out = Arc::new(AtomicBool::new(false));
+        let did_terminate = Arc::new(AtomicBool::new(false));
+
+        wait_for_timeout(
+            receiver,
+            Arc::new(AtomicBool::new(false)),
+            Arc::clone(&timed_out),
+            Duration::from_millis(5),
+            Duration::from_millis(5),
+            record_termination(Arc::clone(&did_terminate)),
+        );
+
+        assert!(!timed_out.load(Ordering::SeqCst));
+        assert!(!did_terminate.load(Ordering::SeqCst));
+    }
 
     #[test]
     fn host_io_pause_has_a_separate_finite_budget() {
         let active = Arc::new(AtomicBool::new(true));
         let timed_out = Arc::new(AtomicBool::new(false));
         let did_terminate = Arc::new(AtomicBool::new(false));
-        let terminated = Arc::clone(&did_terminate);
         let (_completion, receiver) = mpsc::channel();
 
         wait_for_timeout(
@@ -140,7 +182,7 @@ mod tests {
             Arc::clone(&timed_out),
             Duration::from_secs(1),
             Duration::from_millis(20),
-            move || terminated.store(true, Ordering::SeqCst),
+            record_termination(Arc::clone(&did_terminate)),
         );
 
         assert!(timed_out.load(Ordering::SeqCst));

@@ -1,3 +1,4 @@
+/** @type {Map<string, string>} */
 const KATANA_DRAWIO_AWS3D_DARK_COLOR = new Map([
   ["fill|#000000", "#ededed"],
   ["fill|#ececec", "#222222"],
@@ -9,4 +10,5 @@ const KATANA_DRAWIO_AWS3D_DARK_COLOR = new Map([
   ["stroke|#5e5e5e", "#9c9c9c"],
 ]);
 
+/** @type {[Map<string, string>, Map<string, string>]} */
 const KATANA_DRAWIO_SHAPE_COLOR_MAPS = [new Map(), KATANA_DRAWIO_AWS3D_DARK_COLOR];

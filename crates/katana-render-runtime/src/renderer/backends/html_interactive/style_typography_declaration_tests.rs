@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::renderer::backends::html_interactive::style::{
-        CssStyle, CssTextAlign, CssTextTransform, CssWhiteSpace,
+        CssStyle, CssTextAlign, CssTextSpacingTrim, CssTextTransform, CssWhiteSpace,
     };
 
     const BASE_FONT_SIZE: f32 = 14.0;
@@ -102,6 +102,28 @@ mod tests {
         assert_eq!(style.font_feature_settings, None);
         style.apply_typography_property("font-feature-settings", "  ");
         assert_eq!(style.font_feature_settings, None);
+    }
+
+    #[test]
+    fn text_spacing_trim_is_typed_and_inherited() {
+        let mut style = CssStyle::browser_default();
+        assert_eq!(style.text_spacing_trim, CssTextSpacingTrim::Normal);
+        style.apply_typography_property("text-spacing-trim", "space-all");
+        assert_eq!(style.text_spacing_trim, CssTextSpacingTrim::SpaceAll);
+        let inherited = style.inherited_text_style();
+        assert_eq!(inherited.text_spacing_trim, CssTextSpacingTrim::SpaceAll);
+        style.apply_typography_property("text-spacing-trim", "normal");
+        assert_eq!(style.text_spacing_trim, CssTextSpacingTrim::Normal);
+        style.apply_typography_property("text-spacing-trim", "space-all");
+        style.apply_typography_property("text-spacing-trim", "inherit");
+        assert_eq!(style.text_spacing_trim, CssTextSpacingTrim::SpaceAll);
+        let child = CssStyle::from_attributes(
+            &[("style".to_string(), "text-spacing-trim: unset".to_string())],
+            &style,
+        );
+        assert_eq!(child.text_spacing_trim, CssTextSpacingTrim::SpaceAll);
+        style.apply_typography_property("text-spacing-trim", "initial");
+        assert_eq!(style.text_spacing_trim, CssTextSpacingTrim::Normal);
     }
 
     #[test]

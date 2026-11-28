@@ -1,21 +1,13 @@
+use super::test_support::fake_html_label_bundle;
+
 pub(super) fn fake_bundle_with_cisco_placeholders() -> &'static str {
-    FAKE_BUNDLE_WITH_CISCO_PLACEHOLDERS
+    static BUNDLE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BUNDLE
+        .get_or_init(|| fake_html_label_bundle("20", "10", CISCO_PLACEHOLDER_BODY, ""))
+        .as_str()
 }
 
-const FAKE_BUNDLE_WITH_CISCO_PLACEHOLDERS: &str = r#"
-function Graph() {}
-const Editor = {
-  convertHtmlToText(value) {
-    return String(value);
-  },
-};
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "20");
-  svg.setAttribute("height", "10");
-  svg.setAttribute("viewBox", "0 0 20 10");
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+const CISCO_PLACEHOLDER_BODY: &str = r#"  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
   group.setAttribute("data-cell-id", "cisco");
   const fillPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
   fillPath.setAttribute("fill", "fillcolor");
@@ -31,34 +23,16 @@ GraphViewer.createViewerForElement = function createViewerForElement(_container,
   secondaryStroke.setAttribute("stroke", "strokecolor2");
   group.appendChild(secondaryStroke);
   svg.appendChild(group);
-  callback({
-    graph: {
-      getSvg() {
-        return svg;
-      },
-    },
-  });
-};
 "#;
 
 pub(super) fn fake_bundle_with_unresolved_stencil_color() -> &'static str {
-    FAKE_BUNDLE_WITH_UNRESOLVED_STENCIL_COLOR
+    static BUNDLE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BUNDLE
+        .get_or_init(|| fake_html_label_bundle("20", "10", UNRESOLVED_STENCIL_COLOR_BODY, ""))
+        .as_str()
 }
 
-const FAKE_BUNDLE_WITH_UNRESOLVED_STENCIL_COLOR: &str = r##"
-function Graph() {}
-const Editor = {
-  convertHtmlToText(value) {
-    return String(value);
-  },
-};
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "20");
-  svg.setAttribute("height", "10");
-  svg.setAttribute("viewBox", "0 0 20 10");
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+const UNRESOLVED_STENCIL_COLOR_BODY: &str = r##"  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
   group.setAttribute("data-cell-id", "salesforce");
   const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
   rect.setAttribute("width", "20");
@@ -67,12 +41,4 @@ GraphViewer.createViewerForElement = function createViewerForElement(_container,
   rect.setAttribute("style", "fill: light-dark(fillcolor2, #000000)");
   group.appendChild(rect);
   svg.appendChild(group);
-  callback({
-    graph: {
-      getSvg() {
-        return svg;
-      },
-    },
-  });
-};
 "##;

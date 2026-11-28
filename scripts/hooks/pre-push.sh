@@ -22,6 +22,34 @@ unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE \
   GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES \
   GIT_CEILING_DIRECTORIES GIT_DISCOVERY_ACROSS_FILESYSTEM GIT_PREFIX
 
+is_release_verify_draft_push() {
+  if (($# != 4)); then
+    return 1
+  fi
+  local updates_path="$1"
+  local head_sha="$2"
+  local hook_remote="$3"
+  local hook_remote_url="$4"
+  local configured_push_url local_ref local_sha remote_ref remote_sha extra first_update second_update
+  [[ "${hook_remote}" == "origin" ]] || return 1
+  configured_push_url="$(git remote get-url --push origin)" || return 1
+  [[ "${hook_remote_url}" == "${configured_push_url}" ]] || return 1
+  {
+    IFS= read -r first_update || return 1
+    if IFS= read -r second_update || [[ -n "${second_update:-}" ]]; then
+      return 1
+    fi
+  } <"${updates_path}"
+  read -r local_ref local_sha remote_ref remote_sha extra <<<"${first_update}"
+  [[ -z "${extra}" ]] || return 1
+  [[ "$(git branch --show-current)" == "release/verify" ]] || return 1
+  [[ "${local_ref}" == "refs/heads/release/verify" ]] || return 1
+  [[ "${remote_ref}" == "refs/heads/release/verify" ]] || return 1
+  [[ "${local_sha}" =~ ^[0-9a-f]{40}$ && "${remote_sha}" =~ ^[0-9a-f]{40}$ ]] || return 1
+  [[ "${local_sha}" != "0000000000000000000000000000000000000000" ]] || return 1
+  [[ "${local_sha}" == "${head_sha}" ]]
+}
+
 updates="$(mktemp)"
 cleanup() {
   rm -f "${updates}"
@@ -30,6 +58,9 @@ trap cleanup EXIT
 
 cat >"${updates}"
 reviewed_head="$(git rev-parse HEAD)"
+if is_release_verify_draft_push "${updates}" "${reviewed_head}" "$@"; then
+  exit 0
+fi
 if (($# > 0)); then
   export REVIEW_REMOTE="$1"
   if (($# > 1)); then

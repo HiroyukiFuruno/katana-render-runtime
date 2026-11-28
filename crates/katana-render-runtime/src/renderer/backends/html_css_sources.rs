@@ -1,10 +1,16 @@
+use super::html_dom_helpers::text_content;
 use markup5ever_rcdom::{Handle, NodeData};
 use std::collections::HashMap;
 
-const INTERACTIVE_USER_AGENT_STYLES: &str = r#"body { margin: 8px; }
+pub(super) const INTERACTIVE_USER_AGENT_STYLES: &str = r#"body { margin: 8px; }
 a, abbr, b, bdi, bdo, cite, code, data, del, dfn, em, i, ins, kbd, label, mark, q, s, samp, small, span, strong, sub, sup, time, u, var { display: inline; }
+a { color: #0000ee; text-decoration: underline; }
+button, input, textarea, select { font-family: Arial; font-size: 13.333333px; font-weight: 400; color: #000000; line-height: normal; }
+button { background: #efefef; border: 2px solid #767676; border-radius: 2px; padding: 1px 6px; text-align: center; }
+input, textarea { background: #ffffff; border: 2px solid #767676; border-radius: 2px; padding: 1px 2px; }
 b, strong { font-weight: 700; }
 em, i { font-style: italic; }
+ul, ol { margin-top: 1em; margin-bottom: 1em; padding-left: 40px; }
 "#;
 
 pub(super) fn inline_styles(document: &Handle) -> String {
@@ -86,13 +92,6 @@ fn element_name(node: &Handle) -> Option<String> {
     match &node.data {
         NodeData::Element { name, .. } => Some(name.local.to_string().to_ascii_lowercase()),
         _ => None,
-    }
-}
-
-fn text_content(node: &Handle) -> String {
-    match &node.data {
-        NodeData::Text { contents } => contents.borrow().to_string(),
-        _ => node.children.borrow().iter().map(text_content).collect(),
     }
 }
 

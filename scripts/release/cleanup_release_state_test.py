@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import tempfile
@@ -9,38 +8,17 @@ from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parents[1]))
 
+from git_fixture_environment import GIT_FIXTURE_ENVIRONMENT, isolate_git_fixture_environment
 import cleanup_release_state as subject
 
 
 class CleanupReleaseStateTest(unittest.TestCase):
-    _GIT_FIXTURE_ENVIRONMENT = (
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_COMMON_DIR",
-        "GIT_INDEX_FILE",
-        "GIT_OBJECT_DIRECTORY",
-        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        "GIT_CEILING_DIRECTORIES",
-        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
-        "GIT_PREFIX",
-    )
+    _GIT_FIXTURE_ENVIRONMENT = GIT_FIXTURE_ENVIRONMENT
 
     def setUp(self) -> None:
-        saved = {
-            name: os.environ[name]
-            for name in self._GIT_FIXTURE_ENVIRONMENT
-            if name in os.environ
-        }
-        for name in self._GIT_FIXTURE_ENVIRONMENT:
-            os.environ.pop(name, None)
-
-        def restore() -> None:
-            for name in self._GIT_FIXTURE_ENVIRONMENT:
-                os.environ.pop(name, None)
-            os.environ.update(saved)
-
-        self.addCleanup(restore)
+        isolate_git_fixture_environment(self)
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
         self.remote = self.root / "remote.git"
@@ -314,7 +292,9 @@ class CleanupReleaseStateTest(unittest.TestCase):
 
         original_run_git = subject._run_git
 
-        def advance_before_delete(repository: Path, *arguments: str, **kwargs: object):
+        def advance_before_delete(
+            repository: Path, *arguments: str, **kwargs: bool
+        ) -> subprocess.CompletedProcess[str]:
             if arguments[:1] == ("push",) and any(
                 argument.startswith("--force-with-lease=") for argument in arguments
             ):
@@ -417,7 +397,9 @@ class CleanupReleaseStateTest(unittest.TestCase):
         original_run_git = subject._run_git
         push_arguments: list[str] = []
 
-        def change_config_before_delete(repository: Path, *arguments: str, **kwargs: object):
+        def change_config_before_delete(
+            repository: Path, *arguments: str, **kwargs: bool
+        ) -> subprocess.CompletedProcess[str]:
             if arguments[:1] == ("push",) and any(
                 argument.startswith("--force-with-lease=") for argument in arguments
             ):
@@ -468,7 +450,9 @@ class CleanupReleaseStateTest(unittest.TestCase):
         original_run_git = subject._run_git
         network_calls: list[tuple[str, ...]] = []
 
-        def record_network_call(repository: Path, *arguments: str, **kwargs: object):
+        def record_network_call(
+            repository: Path, *arguments: str, **kwargs: bool
+        ) -> subprocess.CompletedProcess[str]:
             if arguments[:1] in (("fetch",), ("pull",), ("push",), ("ls-remote",)):
                 network_calls.append(arguments)
             return original_run_git(repository, *arguments, **kwargs)
@@ -495,7 +479,9 @@ class CleanupReleaseStateTest(unittest.TestCase):
         original_run_git = subject._run_git
         changed = False
 
-        def change_config_after_audit(repository: Path, *arguments: str, **kwargs: object):
+        def change_config_after_audit(
+            repository: Path, *arguments: str, **kwargs: bool
+        ) -> subprocess.CompletedProcess[str]:
             nonlocal changed
             if arguments[:1] in (("fetch",), ("pull",), ("push",), ("ls-remote",)):
                 network_calls.append(arguments)

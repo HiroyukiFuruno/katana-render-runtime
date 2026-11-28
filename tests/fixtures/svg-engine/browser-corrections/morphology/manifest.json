@@ -1,0 +1,64 @@
+{
+  "browser": {
+    "name": "Chromium font observer",
+    "sha256": "031c93c5e822ffd8d22121bb41ed139fb6fcc4e96f6aa1f43ea31ec36fb9242c",
+    "version": "155.0.8059.85"
+  },
+  "cases": [
+    {
+      "input": "filters/feMorphology/empty-radius.svg",
+      "inputSha256": "846a518f461aef3b8bcd2e434f3195c4d1ed849c19a23cc133e8c51649b8545a",
+      "reference": "empty-radius.png",
+      "referenceSha256": "3a3c77846b8cbe9ab7f5c0ee9d3ff97a9fdb1ea191bead031698b4cdfb82d456",
+      "upstreamPngSha256": "47f531da47d6070c6ab41a5902958037d0274431d1a85b9d78eda9d45bd6b6b9",
+      "comparison": "browser-pixels"
+    },
+    {
+      "input": "filters/feMorphology/negative-radius.svg",
+      "inputSha256": "550c4080fe22c0eff28e98b910a587a59c8d2960a34c4636c618fb307a8904e3",
+      "reference": "negative-radius.png",
+      "referenceSha256": "3a3c77846b8cbe9ab7f5c0ee9d3ff97a9fdb1ea191bead031698b4cdfb82d456",
+      "upstreamPngSha256": "47f531da47d6070c6ab41a5902958037d0274431d1a85b9d78eda9d45bd6b6b9",
+      "comparison": "browser-pixels"
+    },
+    {
+      "input": "filters/feMorphology/no-radius.svg",
+      "inputSha256": "a4fc6227d8f1d38984d0534a0bf22425179ea69b6b43fef14a1436123fbe6adb",
+      "reference": "no-radius.png",
+      "referenceSha256": "3a3c77846b8cbe9ab7f5c0ee9d3ff97a9fdb1ea191bead031698b4cdfb82d456",
+      "upstreamPngSha256": "47f531da47d6070c6ab41a5902958037d0274431d1a85b9d78eda9d45bd6b6b9",
+      "comparison": "browser-pixels"
+    },
+    {
+      "input": "filters/feMorphology/radius-with-too-many-values.svg",
+      "inputSha256": "d990eac31d9816f991749c54fdac6a7099cdff8906640bd4fea540676b7d6c62",
+      "reference": "radius-with-too-many-values.png",
+      "referenceSha256": "3a3c77846b8cbe9ab7f5c0ee9d3ff97a9fdb1ea191bead031698b4cdfb82d456",
+      "upstreamPngSha256": "47f531da47d6070c6ab41a5902958037d0274431d1a85b9d78eda9d45bd6b6b9",
+      "comparison": "browser-pixels"
+    },
+    {
+      "input": "filters/feMorphology/radius=10-0.svg",
+      "inputSha256": "c1d89092959280fc9d80cce9e31400b814e505a2039dcfabab1bb0178bddebd2",
+      "reference": "radius=10-0.png",
+      "referenceSha256": "c3aac82074dda127f0e647363ea80b0f1e0fc20d281031a9c3b0f4f3fcf51a90",
+      "upstreamPngSha256": "a7be1ab161ba7770b8adb557c253d2bc4df78a51568f13a36175318a07122b74",
+      "comparison": "one-axis-contract"
+    },
+    {
+      "input": "filters/feMorphology/zero-radius.svg",
+      "inputSha256": "56d593794da119680bcadbe29d1f8ee592db1f433a8708d3e1699f6ea890058e",
+      "reference": "zero-radius.png",
+      "referenceSha256": "3a3c77846b8cbe9ab7f5c0ee9d3ff97a9fdb1ea191bead031698b4cdfb82d456",
+      "upstreamPngSha256": "47f531da47d6070c6ab41a5902958037d0274431d1a85b9d78eda9d45bd6b6b9",
+      "comparison": "browser-pixels"
+    }
+  ],
+  "render": {
+    "deviceScaleFactor": 1,
+    "height": 300,
+    "transparent": true,
+    "width": 300
+  },
+  "schema": "krr-svg-browser-corrections-v1"
+}

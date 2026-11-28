@@ -6,6 +6,9 @@ mod capture;
 mod interaction;
 #[path = "html_browser_preview/paths.rs"]
 mod paths;
+#[cfg(test)]
+#[path = "html_browser_preview/preview_tests.rs"]
+mod preview_tests;
 #[path = "html_browser_preview/report.rs"]
 mod report;
 
@@ -16,14 +19,14 @@ use report::{PreviewCapture, PreviewReport};
 use std::{env, fs};
 
 fn main() {
-    if let Err(error) = run() {
+    if let Err(error) = run(env::args().skip(1)) {
         eprintln!("error: {error}");
         std::process::exit(1);
     }
 }
 
-fn run() -> AppResult<()> {
-    let args = PreviewArgs::parse(env::args().skip(1))?;
+fn run(arguments: impl IntoIterator<Item = String>) -> AppResult<()> {
+    let args = PreviewArgs::parse(arguments)?;
     args.validate()?;
 
     let raw_html = fs::read_to_string(&args.input)

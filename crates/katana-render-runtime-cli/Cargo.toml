@@ -7,6 +7,11 @@ repository.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 description = "CLI front-end for katana-render-runtime: render, reference-update, compare, bench."
+autotests = false
+
+[[test]]
+name = "cli_integration"
+path = "tests/cli_integration.rs"
 
 [[bin]]
 name = "krr"
@@ -17,4 +22,8 @@ katana-render-runtime = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

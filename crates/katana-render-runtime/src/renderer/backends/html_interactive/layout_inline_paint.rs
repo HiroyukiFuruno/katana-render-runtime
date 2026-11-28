@@ -23,10 +23,12 @@ impl HtmlLayoutRenderer {
     ) {
         let mut paint_style = style.clone();
         paint_style.text_align = CssTextAlign::Start;
+        paint_style.text_baseline_offset = inline.baseline_offset;
+        paint_style.line_height = inline.line_height.unwrap_or(style.line_height);
         let context = InlinePaintContext {
             initial_x,
             initial_y,
-            style,
+            style: &paint_style,
             inline,
             paint_style: &paint_style,
         };
@@ -43,20 +45,24 @@ impl HtmlLayoutRenderer {
         };
         let (leading_width, visible_line) = InlineMeasurement::visible_line(line, context.style);
         let line_x = line_x + leading_width;
-        let line_y = context.initial_y + index as f32 * context.style.line_height;
+        let line_y = context.initial_y + context.inline.line_advance(index, context.style);
+        let style = context.inline.text_line_style(index, context.paint_style);
         let visible_line = visible_line.to_string();
         self.record_inline_fragment(
             line_x,
             line_y,
             InlineMeasurement::text_width(&visible_line, context.style),
-            context.style.line_height,
+            style.line_height,
         );
+        if visible_line.is_empty() {
+            return;
+        }
         self.paint_text_lines(
             std::slice::from_ref(&visible_line),
             line_x,
             (context.inline.x + context.inline.width - line_x).max(MIN_LAYOUT_WIDTH),
             line_y + context.style.font_size,
-            context.paint_style,
+            &style,
         );
     }
 }

@@ -1,12 +1,48 @@
 use super::super::super::font::font_source_generation;
-use super::super::fallback_generation::HtmlFallbackSelection;
+use super::super::fallback_generation::{
+    FileGenerationDependencies, HtmlFallbackSelection, MAX_FILE_DEPENDENCIES,
+};
 use super::{HTML_FALLBACK_CACHE, HtmlFallbackKey, insert_cached, insert_html_face, lookup_cached};
 use resvg::usvg;
 use std::sync::Arc;
 
 #[test]
+fn fallback_cache_stops_recording_after_the_file_dependency_limit() -> Result<(), String> {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/assets/fonts/NotoSans-Regular.ttf"
+    );
+    let mut database = usvg::fontdb::Database::new();
+    database
+        .load_font_file(path)
+        .map_err(|error| error.to_string())?;
+    let id = database
+        .faces()
+        .next()
+        .ok_or("bundled font face missing")?
+        .id;
+    let generation = font_source_generation(&database, id);
+    assert!(generation.is_file());
+    assert!(generation.reusable());
+
+    let mut dependencies = FileGenerationDependencies::new();
+    for _ in 0..MAX_FILE_DEPENDENCIES {
+        dependencies.observe(id, generation.clone(), generation.clone());
+    }
+    assert!(dependencies.reusable);
+    dependencies.observe(id, generation.clone(), generation);
+    assert!(!dependencies.reusable);
+    assert_eq!(dependencies.entries.len(), MAX_FILE_DEPENDENCIES);
+    Ok(())
+}
+
+#[test]
 fn unavailable_generation_cannot_enter_or_reuse_durable_fallback_cache() -> Result<(), String> {
     let (database, face_id, generation) = unavailable_file_generation()?;
+    let mut observed = FileGenerationDependencies::new();
+    observed.observe(face_id, generation.clone(), generation.clone());
+    assert!(!observed.reusable);
+    assert!(observed.entries.is_empty());
     let key = HtmlFallbackKey {
         base_face_id: face_id,
         character: 'A',

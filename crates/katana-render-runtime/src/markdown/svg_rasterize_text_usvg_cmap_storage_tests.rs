@@ -138,6 +138,10 @@ fn local_cache_purges_dropped_database() -> Result<(), String> {
 
 #[test]
 fn poisoned_global_cache_fails_closed_and_raii_restores_it() -> Result<(), String> {
+    const CASE: &str = "markdown::svg_rasterize::text_shaping::usvg_cmap::storage::tests::poisoned_global_cache_fails_closed_and_raii_restores_it";
+    if !global_child::run_parent_or_allow_child(CASE)? {
+        return Ok(());
+    }
     let _lock = begin()?;
     let _reset = CacheResetOnDrop;
     poison_global_cache()?;
@@ -161,6 +165,17 @@ pub(in super::super) fn poison_global_cache() -> Result<(), String> {
 
 #[test]
 fn global_cache_accepts_exact_entry_bound_and_rejects_excess() -> Result<(), String> {
+    const CASE: &str = "markdown::svg_rasterize::text_shaping::usvg_cmap::storage::tests::global_cache_accepts_exact_entry_bound_and_rejects_excess";
+    if !global_child::run_parent_or_allow_child(CASE)? {
+        return Ok(());
+    }
+    global_cache_accepts_exact_entry_bound_and_rejects_excess_body()
+}
+
+#[path = "svg_rasterize_text_usvg_cmap_storage_generation_tests.rs"]
+mod generation_tests;
+
+fn global_cache_accepts_exact_entry_bound_and_rejects_excess_body() -> Result<(), String> {
     let _lock = begin()?;
     let _reset = CacheResetOnDrop;
     let (database, id) = database()?;
@@ -189,5 +204,5 @@ fn global_cache_accepts_exact_entry_bound_and_rejects_excess() -> Result<(), Str
     Ok(())
 }
 
-#[path = "svg_rasterize_text_usvg_cmap_storage_generation_tests.rs"]
-mod generation_tests;
+#[path = "svg_rasterize_text_usvg_cmap_global_child_tests.rs"]
+pub(in super::super) mod global_child;
