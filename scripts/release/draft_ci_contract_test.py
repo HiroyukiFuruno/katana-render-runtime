@@ -186,6 +186,11 @@ class DraftCiContractTest(unittest.TestCase):
         self.assertEqual(scoped.count("bash scripts/hooks/check_automation_changes.sh"), 1)
         self.assertIn("ref: ${{ github.event.pull_request.head.sha }}", scoped)
         self.assertEqual(scoped.count("git diff --check \"$PR_BASE_SHA\" \"$PR_HEAD_SHA\""), 2)
+        matrix = scoped[scoped.index("  scoped-test:\n") : scoped.index("  scoped-preflight:\n")]
+        self.assertLess(
+            matrix.index("git config --global core.longpaths true"),
+            matrix.index("uses: actions/checkout@"),
+        )
 
     def test_evidence_and_preflight_truth_table_gates_draft_and_release_eligibility(self) -> None:
         draft_events = ("opened", "synchronize", "converted_to_draft")
