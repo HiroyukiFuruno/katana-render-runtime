@@ -718,7 +718,7 @@ jobs:
 
       - name: Verify optional local HTML performance evidence
         id: html_local_proof
-        if: steps.source.outputs.version != '0.4.24' && (github.event_name == 'pull_request' || github.ref == 'refs/heads/master')
+        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/master'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -726,17 +726,26 @@ jobs:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          evidence_args=()
+          if [[ "${{ steps.source.outputs.version }}" == '0.4.24' ]]; then
+            evidence_args+=(--visual)
+          fi
           if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
             python3 scripts/release/local_html_performance_evidence.py --repository "$GITHUB_REPOSITORY" \
-              --verify --pr "$PR_NUMBER" --base "$PR_BASE_SHA" --head "$PR_HEAD_SHA"
+              "${evidence_args[@]}" --verify --pr "$PR_NUMBER" --base "$PR_BASE_SHA" --head "$PR_HEAD_SHA"
           else
             python3 scripts/release/local_html_performance_evidence.py --repository "$GITHUB_REPOSITORY" \
-              --verify-merged-head "$GITHUB_SHA"
+              "${evidence_args[@]}" --verify-merged-head "$GITHUB_SHA"
           fi
 
       - name: Report local HTML performance evidence
         if: steps.html_local_proof.outcome == 'success' && steps.html_local_proof.outputs.reuse == 'true'
-        run: echo 'HTML performance reused from verified maintainer evidence.'
+        run: |
+          if [[ "${{ steps.source.outputs.version }}" == '0.4.24' ]]; then
+            echo 'HTML visual evidence reused from verified maintainer evidence.'
+          else
+            echo 'HTML performance reused from verified maintainer evidence.'
+          fi
 
       - name: Install Rust toolchain
         if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
@@ -817,7 +826,7 @@ jobs:
           echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
 
       - name: Verify all 84 HTML images and font identities for v0.4.24
-        if: steps.source.outputs.version == '0.4.24'
+        if: steps.source.outputs.version == '0.4.24' && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
         env:
           CAPTURE_MANIFEST: ${{ steps.html84.outputs.manifest }}
         run: |

@@ -5,8 +5,11 @@ import datetime
 import importlib.metadata
 import json
 import platform
+import subprocess
+import tempfile
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from html_performance_memory_policy import CURRENT_ACCEPTANCE_POLICY_VERSION
@@ -80,6 +83,67 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
                                             "c" * 40, self.workflow, "owner", self.now,
                                             hosted_macos=host), accepted)
 
+    def test_visual_proof_is_v024_owner_exact_and_27_to_26_only(self) -> None:
+        visual = {"schema": proof.SCHEMA, "repository": "owner/repo", "pull_request": 3,
+                  "base_sha": "b" * 40, "head_sha": "c" * 40, "workflow_sha256": self.workflow,
+                  "scope_sha256": proof.visual_scope(self.workflow), "completed_at": self.comment["created_at"],
+                  "command": proof.VISUAL_COMMAND, "verification_kind": proof.VISUAL_KIND,
+                  "platform": "macos-arm64", "os_version": "27.2.1",
+                  "capture_manifest_sha256": "d" * 64, "plan_sha256": "e" * 64,
+                  "source_digest": "f" * 64, "result_sha256": "1" * 64,
+                  "accepted_conditions": 84, "threshold": 90, "font_identity_equivalence": "established"}
+        comment = {**self.comment, "body": proof.MARKER + "\n" + json.dumps(visual)}
+        self.assertTrue(proof.valid(comment, "owner/repo", 3, "b" * 40, "c" * 40,
+                                    self.workflow, "owner", self.now, hosted_macos="26.4"))
+        self.assertTrue(proof.valid(comment, "owner/repo", 3, "b" * 40, "c" * 40,
+                                    self.workflow, "owner", self.now))
+        for host in ("27.1", "25.9", "26.invalid"):
+            self.assertFalse(proof.valid(comment, "owner/repo", 3, "b" * 40, "c" * 40,
+                                         self.workflow, "owner", self.now, hosted_macos=host))
+        visual["verification_kind"] = "other"
+        self.assertFalse(proof.valid({**comment, "body": proof.MARKER + "\n" + json.dumps(visual)},
+                                     "owner/repo", 3, "b" * 40, "c" * 40, self.workflow, "owner", self.now,
+                                     hosted_macos="26.4"))
+
+    def test_visual_collector_requires_validated_source_and_fixed_observer(self) -> None:
+        source = "a" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest, plan, receipt = (root / name for name in ("captures.json", "plan.json", "receipt.json"))
+            plan.write_text("{}", encoding="utf8")
+            context = {"sourceManifest": {"digest": source},
+                       "os": {"release": platform.release(), "version": platform.version()}}
+            receipt.write_text(json.dumps({"browserExecutableSha256": proof.VISUAL_OBSERVER_SHA256}),
+                               encoding="utf8")
+            condition = {"chromeReceiptPath": str(receipt), "chromeReceiptSha256": gate.sha256(receipt)}
+            manifest.write_text(json.dumps({"producerContext": context, "producerContextAfter": context,
+                                           "conditions": [condition] * 84}),
+                                encoding="utf8")
+            validated = {"schema": "krr-html84-independent-stage90-validation-v1",
+                         "acceptance": True, "threshold": 90, "fontIdentityEquivalence": "established",
+                         "conditions": [{}] * 84, "manifestSha256": gate.sha256(manifest),
+                         "planSha256": gate.sha256(plan)}
+            completed = subprocess.CompletedProcess(["bun"], 0, json.dumps(validated))
+            with (patch.object(proof, "_current_source_digest", return_value=source) as current_source,
+                  patch.object(subprocess, "run", return_value=completed) as check):
+                self.assertEqual(proof.validate_visual(manifest, plan)["accepted_conditions"], 84)
+                self.assertIn(proof.VISUAL_COMMAND, check.call_args.args[0])
+                plan.write_text('{"changed":true}', encoding="utf8")
+                with self.assertRaisesRegex(mac.EvidenceError, "did not establish"):
+                    proof.validate_visual(manifest, plan)
+                receipt.write_text("{}", encoding="utf8")
+                with self.assertRaisesRegex(mac.EvidenceError, "receipt SHA differs"):
+                    proof.validate_visual(manifest, plan)
+                condition["chromeReceiptSha256"] = gate.sha256(receipt)
+                manifest.write_text(json.dumps({"producerContext": context, "producerContextAfter": context,
+                                                "conditions": [condition] * 84}),
+                                    encoding="utf8")
+                with self.assertRaisesRegex(mac.EvidenceError, "observer differs"):
+                    proof.validate_visual(manifest, plan)
+                current_source.return_value = "b" * 64
+                with self.assertRaisesRegex(mac.EvidenceError, "source differs"):
+                    proof.validate_visual(manifest, plan)
+
     def test_owner_api_double_read_rejects_duplicates_and_changes(self) -> None:
         owner = "owner"
         with patch.object(mac, "workflow_scope_supported", return_value=True), \
@@ -112,10 +176,8 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
         paired = workflow_job(workflow, "paired-performance")
         steps = {step.get("name"): step for step in workflow_steps(paired)}
         self.assertEqual(steps["Verify optional local HTML performance evidence"].get("continue-on-error"), "true")
-        require_performance = "steps.source.outputs.version != '0.4.24'"
         self.assertEqual(steps["Verify optional local HTML performance evidence"].get("if"),
-                         require_performance +
-                         " && (github.event_name == 'pull_request' || github.ref == 'refs/heads/master')")
+                         "github.event_name == 'pull_request' || github.ref == 'refs/heads/master'")
         self.assertIn('--verify-merged-head "$GITHUB_SHA"', paired)
         expected = "steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'"
         for name in ("Install Rust toolchain", "Capture all 84 HTML catalog conditions"):
@@ -123,9 +185,9 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
         for name in ("Measure all 84 catalog conditions against baseline",
                      "Upload immutable source and run bound paired evidence",
                      "Attest immutable paired performance artifact"):
-            self.assertEqual(steps[name].get("if"), f"{require_performance} && ({expected})")
+            self.assertEqual(steps[name].get("if"), "steps.source.outputs.version != '0.4.24' && (" + expected + ")")
         self.assertEqual(steps["Verify all 84 HTML images and font identities for v0.4.24"].get("if"),
-                         "steps.source.outputs.version == '0.4.24'")
+                         "steps.source.outputs.version == '0.4.24' && (" + expected + ")")
         self.assertIn("needs: [test, paired-performance]", workflow_job(workflow, "preflight"))
 
     def test_merged_proof_reuses_the_exact_binding_and_host_policy(self) -> None:
@@ -136,7 +198,8 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
               patch.object(proof, "verified_merged_pr_binding", return_value=binding) as resolved,
               patch.object(proof, "verify_from_api", return_value=True) as verify):
             self.assertTrue(proof.verify_merged_from_api("owner/repo", merge, hosted_macos="26.7.2"))
-            verify.assert_called_once_with("owner/repo", 3, base, head, hosted_macos="26.7.2", merge_head=merge)
+            verify.assert_called_once_with("owner/repo", 3, base, head, hosted_macos="26.7.2", merge_head=merge,
+                                           visual=False)
             self.assertEqual(resolved.call_count, 2)
             resolved.side_effect = [binding, (4, base, head)]
             self.assertFalse(proof.verify_merged_from_api("owner/repo", merge))

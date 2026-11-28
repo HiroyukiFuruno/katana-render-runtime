@@ -8,6 +8,34 @@ from local_macos_workflow_contract_test import workflow_job, workflow_steps
 
 
 class ObserverWorkflowTest(unittest.TestCase):
+    def test_v0424_uses_local_visual_evidence_on_pr_and_master_only(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root / ".github/workflows/test-and-build.yml").read_text(encoding="utf8")
+        job = workflow_job(workflow, "paired-performance")
+        steps = {step.get("name"): step for step in workflow_steps(job)}
+        proof = steps["Verify optional local HTML performance evidence"]
+        self.assertEqual(
+            proof.get("if"),
+            "github.event_name == 'pull_request' || github.ref == 'refs/heads/master'",
+        )
+        proof_text = job.split("      - name: Verify optional local HTML performance evidence\n", 1)[1].split(
+            "\n      - name:", 1
+        )[0]
+        self.assertIn('if [[ "${{ steps.source.outputs.version }}" == \'0.4.24\' ]]; then', proof_text)
+        self.assertIn("evidence_args+=(--visual)", proof_text)
+        self.assertIn('"${evidence_args[@]}" --verify --pr', proof_text)
+        self.assertIn('"${evidence_args[@]}" --verify-merged-head "$GITHUB_SHA"', proof_text)
+        fallback = steps["Capture all 84 HTML catalog conditions"]["if"]
+        self.assertEqual(
+            steps["Verify all 84 HTML images and font identities for v0.4.24"]["if"],
+            f"steps.source.outputs.version == '0.4.24' && ({fallback})",
+        )
+        report_text = job.split("      - name: Report local HTML performance evidence\n", 1)[1].split(
+            "\n      - name:", 1
+        )[0]
+        self.assertIn("HTML visual evidence reused from verified maintainer evidence.", report_text)
+        self.assertIn("HTML performance reused from verified maintainer evidence.", report_text)
+
     def test_fresh_capture_uses_verified_pinned_observer_from_release_or_ci(self) -> None:
         root = Path(__file__).resolve().parents[2]
         workflow = (root / ".github/workflows/test-and-build.yml").read_text(encoding="utf8")

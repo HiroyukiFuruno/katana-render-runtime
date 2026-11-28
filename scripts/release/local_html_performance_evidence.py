@@ -7,6 +7,7 @@ import platform
 import re
 import subprocess
 import time
+import tomllib
 from pathlib import Path
 from typing import cast
 
@@ -21,11 +22,84 @@ MARKER = "<!-- krr-local-html-performance:v1 -->"
 SCHEMA = "krr-local-html-performance-v2"
 COMMAND = "verify_html_performance_evidence.verify"
 REUSE_COMMAND = "html_performance_source_reuse_cli.verify_reuse_request"
+VISUAL_COMMAND = "catalog-stage90-validate-captures"
+VISUAL_KIND = "v0.4.24-visual-v1"
+VISUAL_OBSERVER_SHA256 = "031c93c5e822ffd8d22121bb41ed139fb6fcc4e96f6aa1f43ea31ec36fb9242c"
 
 
 def scope(workflow_sha: str) -> str:
     return mac.sha256_bytes(mac.canonical({"schema": SCHEMA, "command": COMMAND,
                                           "workflow_sha256": workflow_sha}))
+
+
+def visual_scope(workflow_sha: str) -> str:
+    return mac.sha256_bytes(mac.canonical({"schema": SCHEMA, "command": VISUAL_COMMAND,
+                                          "workflow_sha256": workflow_sha}))
+
+
+def _record(value: object, label: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise mac.EvidenceError(f"{label} is invalid")
+    return value
+
+
+def _sha(value: object, label: str) -> str:
+    if not isinstance(value, str) or not mac.is_sha256(value):
+        raise mac.EvidenceError(f"{label} SHA is invalid")
+    return value
+
+
+def _current_source_digest() -> str:
+    result = subprocess.run(
+        ["bun", "scripts/mermaid/native-source-manifest.ts", "--root", str(mac.ROOT)],
+        cwd=mac.ROOT, text=True, capture_output=True, check=True,
+    )
+    return _sha(_record(json.loads(result.stdout), "current source manifest").get("digest"), "current source")
+
+
+def validate_visual(manifest_path: Path, plan_path: Path) -> dict[str, object]:
+    """Accept only the independent validator result, bound to current source and observer."""
+    manifest_sha, plan_sha = gate.sha256(manifest_path), gate.sha256(plan_path)
+    manifest = _record(json.loads(manifest_path.read_text(encoding="utf8")), "visual capture manifest")
+    before = _record(manifest.get("producerContext"), "visual producer context")
+    after = _record(manifest.get("producerContextAfter"), "visual producer context after")
+    host = {"release": platform.release(), "version": platform.version()}
+    if before.get("os") != host or after.get("os") != host:
+        raise mac.EvidenceError("visual capture host differs from current macOS")
+    source = _sha(_record(before.get("sourceManifest"), "visual source manifest").get("digest"), "visual source")
+    if source != _sha(_record(after.get("sourceManifest"), "visual source manifest after").get("digest"), "visual source after") or source != _current_source_digest():
+        raise mac.EvidenceError("visual capture source differs from current HEAD")
+    conditions = manifest.get("conditions")
+    if not isinstance(conditions, list) or len(conditions) != 84:
+        raise mac.EvidenceError("visual capture does not contain 84 conditions")
+    for condition in conditions:
+        row = _record(condition, "visual condition")
+        receipt_path = row.get("chromeReceiptPath")
+        if not isinstance(receipt_path, str):
+            raise mac.EvidenceError("visual condition receipt is absent")
+        receipt_bytes = Path(receipt_path).read_bytes()
+        if mac.sha256_bytes(receipt_bytes) != row.get("chromeReceiptSha256"):
+            raise mac.EvidenceError("visual condition receipt SHA differs")
+        receipt = _record(json.loads(receipt_bytes), "visual Chrome receipt")
+        if receipt.get("browserExecutableSha256") != VISUAL_OBSERVER_SHA256:
+            raise mac.EvidenceError("visual capture observer differs from CI pin")
+    completed = subprocess.run(
+        ["bun", "scripts/html/fidelity-acceptance-cli.ts", VISUAL_COMMAND,
+         str(manifest_path), str(plan_path)],
+        cwd=mac.ROOT, text=True, capture_output=True, check=True,
+    )
+    result = _record(json.loads(completed.stdout), "visual validation result")
+    validated_conditions = result.get("conditions")
+    if (result.get("schema") != "krr-html84-independent-stage90-validation-v1" or
+            result.get("acceptance") is not True or result.get("threshold") != 90 or
+            result.get("fontIdentityEquivalence") != "established" or
+            not isinstance(validated_conditions, list) or len(validated_conditions) != 84 or
+            result.get("manifestSha256") != manifest_sha or result.get("planSha256") != plan_sha or
+            gate.sha256(manifest_path) != manifest_sha or gate.sha256(plan_path) != plan_sha):
+        raise mac.EvidenceError("visual validation did not establish all HTML84 conditions")
+    return {"capture_manifest_sha256": manifest_sha, "plan_sha256": plan_sha,
+            "source_digest": source, "result_sha256": mac.sha256_bytes(mac.canonical(result)),
+            "accepted_conditions": 84, "threshold": 90, "font_identity_equivalence": "established"}
 
 
 def valid_macos_version(value: object) -> bool:
@@ -66,6 +140,33 @@ def valid(comment: object, repository: str, number: int, base: str, head: str,
     value = _payload(comment)
     if not isinstance(comment, dict) or value is None:
         return False
+    visual = value.get("verification_kind") == VISUAL_KIND
+    if visual:
+        keys = {"schema", "repository", "pull_request", "base_sha", "head_sha", "workflow_sha256",
+                "scope_sha256", "completed_at", "command", "verification_kind", "platform", "os_version",
+                "capture_manifest_sha256", "plan_sha256", "source_digest", "result_sha256",
+                "accepted_conditions", "threshold", "font_identity_equivalence"}
+        try:
+            completed = mac.iso_timestamp(value.get("completed_at"))
+            created = mac.iso_timestamp(comment.get("created_at"))
+            updated = mac.iso_timestamp(comment.get("updated_at"))
+        except mac.EvidenceError:
+            return False
+        user = comment.get("user")
+        login = user.get("login") if isinstance(user, dict) else None
+        return (set(value) == keys and isinstance(login, str) and login.lower() == owner.lower()
+                and comment.get("author_association") == "OWNER" and value.get("schema") == SCHEMA
+                and value.get("repository") == repository and type(value.get("pull_request")) is int and value.get("pull_request") == number
+                and value.get("base_sha") == base and value.get("head_sha") == head
+                and value.get("workflow_sha256") == workflow_sha
+                and value.get("scope_sha256") == visual_scope(workflow_sha)
+                and value.get("command") == VISUAL_COMMAND and value.get("platform") == "macos-arm64"
+                and mac.macos_major(value.get("os_version")) == 27
+                and (hosted_macos is None or mac.macos_major(hosted_macos) == 26)
+                and all(mac.is_sha256(value.get(key)) for key in ("capture_manifest_sha256", "plan_sha256", "source_digest", "result_sha256"))
+                and value.get("accepted_conditions") == 84 and value.get("threshold") == 90
+                and value.get("font_identity_equivalence") == "established"
+                and created == updated and abs(completed - created) <= 300 and 0 <= now - completed <= mac.FRESHNESS_SECONDS)
     keys = {"schema", "repository", "pull_request", "base_sha", "head_sha", "workflow_sha256",
             "scope_sha256", "completed_at", "command", "bundle_manifest_sha256", "result_sha256",
             "conditions", "candidate_conditions", "checks", "formal_pass", "platform", "os_version",
@@ -121,7 +222,8 @@ def valid(comment: object, repository: str, number: int, base: str, head: str,
 
 
 def verify_from_api(repository: str, number: int, base: str, head: str, *,
-                    hosted_macos: str | None = None, merge_head: str | None = None) -> bool:
+                    hosted_macos: str | None = None, merge_head: str | None = None,
+                    visual: bool = False) -> bool:
     try:
         if not mac.workflow_scope_supported():
             return False
@@ -148,7 +250,8 @@ def verify_from_api(repository: str, number: int, base: str, head: str, *,
         current = [item for item in marked if (p := _payload(item)) is not None
                    and p.get("repository") == repository and p.get("pull_request") == number
                    and p.get("base_sha") == base and p.get("head_sha") == head
-                   and p.get("workflow_sha256") == workflow_sha and p.get("scope_sha256") == scope(workflow_sha)
+                   and p.get("workflow_sha256") == workflow_sha and p.get("scope_sha256") == (visual_scope(workflow_sha) if visual else scope(workflow_sha))
+                   and (p.get("verification_kind") == VISUAL_KIND if visual else p.get("verification_kind") != VISUAL_KIND)
                    and not mac.is_expired_receipt(item, p, now)]
         return len(current) == 1 and valid(current[0], repository, number, base, head,
                                            workflow_sha, first[0], now, hosted_macos=hosted_macos)
@@ -158,7 +261,7 @@ def verify_from_api(repository: str, number: int, base: str, head: str, *,
 
 
 def verify_merged_from_api(repository: str, merge_head: str, *,
-                           hosted_macos: str | None = None) -> bool:
+                           hosted_macos: str | None = None, visual: bool = False) -> bool:
     try:
         if not mac.workflow_scope_supported():
             return False
@@ -168,7 +271,7 @@ def verify_merged_from_api(repository: str, merge_head: str, *,
             return mac.api_request(token, "GET", path)
 
         binding = verified_merged_pr_binding(fetch, repository, merge_head)
-        if not verify_from_api(repository, *binding, hosted_macos=hosted_macos, merge_head=merge_head):
+        if not verify_from_api(repository, *binding, hosted_macos=hosted_macos, merge_head=merge_head, visual=visual):
             return False
         return verified_merged_pr_binding(fetch, repository, merge_head) == binding
     except (mac.EvidenceError, ValueError, TypeError, KeyError, OSError, RuntimeError,
@@ -261,6 +364,38 @@ def collect(repository: str, number: int, directory: Path,
     return projection
 
 
+def collect_visual(repository: str, number: int, manifest: Path, plan: Path) -> dict[str, object]:
+    os_version = mac.macos_product_version()
+    if platform.system() != "Darwin" or platform.machine() != "arm64" or mac.macos_major(os_version) != 27:
+        raise mac.EvidenceError("visual collection requires macOS Apple Silicon 27")
+    mac.require_standard_index_flags()
+    if mac.git_status() or not mac.workflow_scope_supported():
+        raise mac.EvidenceError("source or workflow is not eligible")
+    with (mac.ROOT / "Cargo.toml").open("rb") as cargo:
+        if tomllib.load(cargo)["workspace"]["package"]["version"] != "0.4.24":
+            raise mac.EvidenceError("visual evidence is limited to v0.4.24")
+    head = mac.run_git("rev-parse", "HEAD")
+    source = mac.head_worktree_bytes_digest(head)
+    workflow_sha = mac.workflow_digest()
+    token = mac.gh_token()
+    owner = mac.canonical_owner(mac.api_request(token, "GET", f"repos/{repository}"), repository)
+    login = mac.api_request(token, "GET", "user")
+    if not isinstance(login, dict) or login.get("login", "").lower() != owner.lower():
+        raise mac.EvidenceError("repository owner required")
+    base, pr_head = mac.validate_pr(mac.api_request(token, "GET", f"repos/{repository}/pulls/{number}"), repository, number)
+    if head != pr_head or mac.run_git("merge-base", base, head) != base:
+        raise mac.EvidenceError("PR source differs")
+    proof = validate_visual(manifest.resolve(), plan.resolve())
+    if (mac.git_status() or mac.run_git("rev-parse", "HEAD") != head or mac.macos_product_version() != os_version or
+            mac.head_worktree_bytes_digest(head) != source or mac.workflow_digest() != workflow_sha or
+            mac.validate_pr(mac.api_request(token, "GET", f"repos/{repository}/pulls/{number}"), repository, number) != (base, head)):
+        raise mac.EvidenceError("source or PR changed during visual verification")
+    return {"schema": SCHEMA, "repository": repository, "pull_request": number, "base_sha": base,
+            "head_sha": head, "workflow_sha256": workflow_sha, "scope_sha256": visual_scope(workflow_sha),
+            "completed_at": mac.utc_now(), "command": VISUAL_COMMAND, "verification_kind": VISUAL_KIND,
+            "platform": "macos-arm64", "os_version": os_version, **proof}
+
+
 def ci_reused_local_evidence(jobs: list[dict[str, object]]) -> bool:
     paired = [job for job in jobs if job.get("name") == "Native paired HTML time and RSS nonregression"]
     if len(paired) != 1:
@@ -288,36 +423,44 @@ def main() -> int:
     parser.add_argument("--verify", action="store_true")
     parser.add_argument("--verify-merged-head")
     parser.add_argument("--publish", action="store_true")
+    parser.add_argument("--visual", action="store_true")
+    parser.add_argument("--visual-manifest", type=Path)
+    parser.add_argument("--visual-plan", type=Path)
     args = parser.parse_args()
     try:
         if args.verify_merged_head is not None:
-            if args.verify or args.publish or args.bundle or args.reuse_request or args.pr is not None or args.base or args.head:
+            if args.verify or args.publish or args.bundle or args.reuse_request or args.pr is not None or args.base or args.head or args.visual_manifest or args.visual_plan:
                 raise mac.EvidenceError("invalid merged verification arguments")
             accepted = (platform.system() == "Darwin" and platform.machine() == "arm64"
                         and verify_merged_from_api(args.repository, args.verify_merged_head,
-                                                   hosted_macos=mac.macos_product_version()))
+                                                   hosted_macos=mac.macos_product_version(), visual=args.visual))
             mac.output_reuse(accepted, __import__("os").environ.get("GITHUB_OUTPUT"))
             return 0
         if args.pr is None:
             raise mac.EvidenceError("PR number is required")
         if args.verify:
-            if args.publish or args.bundle or args.reuse_request or not args.base or not args.head:
+            if args.publish or args.bundle or args.reuse_request or args.visual_manifest or args.visual_plan or not args.base or not args.head:
                 raise mac.EvidenceError("invalid verification arguments")
             accepted = (platform.system() == "Darwin" and platform.machine() == "arm64"
                         and verify_from_api(args.repository, args.pr, args.base, args.head,
-                                            hosted_macos=mac.macos_product_version()))
+                                            hosted_macos=mac.macos_product_version(), visual=args.visual))
             mac.output_reuse(accepted, __import__("os").environ.get("GITHUB_OUTPUT"))
             return 0
-        if args.bundle is None:
+        if args.visual:
+            if args.bundle or args.reuse_request or args.visual_manifest is None or args.visual_plan is None:
+                raise mac.EvidenceError("visual manifest and plan are required")
+            payload = collect_visual(args.repository, args.pr, args.visual_manifest, args.visual_plan)
+        elif args.bundle is None or args.visual_manifest is not None or args.visual_plan is not None:
             raise mac.EvidenceError("bundle is required")
-        payload = collect(args.repository, args.pr, args.bundle.resolve(),
-                          args.reuse_request.absolute() if args.reuse_request is not None else None)
+        else:
+            payload = collect(args.repository, args.pr, args.bundle.resolve(),
+                              args.reuse_request.absolute() if args.reuse_request is not None else None)
         if args.publish:
             token = mac.gh_token()
             base = gate._text(payload.get("base_sha"), "PR base")
             head = gate._text(payload.get("head_sha"), "PR head")
-            if verify_from_api(args.repository, args.pr, base, head):
-                print("A fresh local HTML performance proof already exists")
+            if verify_from_api(args.repository, args.pr, base, head, visual=args.visual):
+                print("A fresh local HTML proof already exists")
                 return 0
             comments = mac.read_comments_api(token, args.repository, args.pr)
             for comment in comments:
@@ -339,9 +482,10 @@ def main() -> int:
             posted_login = user.get("login") if isinstance(user, dict) else None
             if (not isinstance(posted_login, str) or posted_login.lower() != owner.lower()
                     or posted.get("author_association") != "OWNER"
-                    or not verify_from_api(args.repository, args.pr, base, head)):
+                    or not verify_from_api(args.repository, args.pr, base, head, visual=args.visual)):
                 raise mac.EvidenceError("published HTML evidence was not independently verified")
-        print("Local HTML performance evidence validated" + (" and published" if args.publish else ""))
+        kind = "visual" if args.visual else "performance"
+        print(f"Local HTML {kind} evidence validated" + (" and published" if args.publish else ""))
         return 0
     except (mac.EvidenceError, ValueError, TypeError, KeyError, OSError, RuntimeError,
             subprocess.SubprocessError) as error:
