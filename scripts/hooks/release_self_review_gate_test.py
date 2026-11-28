@@ -87,6 +87,34 @@ class ReleaseSelfReviewGateTest(unittest.TestCase):
         self.verify()
         self.assertEqual(self.git.call_count, 3)
 
+    def test_full_quality_gate_requires_evidence_for_local_prerequisites(self) -> None:
+        tasks = cast(list[object], self.document["tasks"])
+        prerequisite: dict[str, object] = {
+            "id": "workflow-reuse",
+            "blocks_full_quality_gate": True,
+            "evidence": "",
+        }
+        tasks.append(prerequisite)
+        self.git.side_effect = None
+        self.git.return_value = "release/v0.4.24\n"
+        for state in ("pending", "running", "failed", "done"):
+            with self.subTest(state=state):
+                prerequisite["state"] = state
+                self.write_ledger()
+                with self.assertRaisesRegex(ReviewError, "ローカル作業が残っています.*workflow-reuse"):
+                    self.verify()
+        prerequisite["evidence"] = "verified reuse result"
+        self.write_ledger()
+        self.git.side_effect = ["release/v0.4.24\n", HEAD + "\n", ""]
+        self.verify()
+
+    def test_rejects_an_invalid_local_prerequisite_flag(self) -> None:
+        tasks = cast(list[object], self.document["tasks"])
+        tasks.append({"id": "workflow-reuse", "blocks_full_quality_gate": "true"})
+        self.write_ledger()
+        with self.assertRaisesRegex(ReviewError, "先行タスク指定が不正です"):
+            self.verify()
+
     def test_no_codex_thread_does_not_add_requirements(self) -> None:
         self.verify("")
         self.git.assert_not_called()

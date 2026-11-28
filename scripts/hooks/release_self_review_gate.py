@@ -15,6 +15,24 @@ REVIEW_TASK_ID = "pre-pr-self-review"
 SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
+def require_completed_local_work(tasks: list[object]) -> None:
+    remaining: list[str] = []
+    for task in tasks:
+        if not isinstance(task, dict) or "blocks_full_quality_gate" not in task:
+            continue
+        blocks = task["blocks_full_quality_gate"]
+        identifier = task.get("id")
+        if type(blocks) is not bool or not isinstance(identifier, str) or not identifier.strip():
+            raise ReviewError("完全検査の先行タスク指定が不正です")
+        evidence = task.get("evidence")
+        if blocks and (
+            task.get("state") != "done" or not isinstance(evidence, str) or not evidence.strip()
+        ):
+            remaining.append(identifier)
+    if remaining:
+        raise ReviewError(f"完全検査より先に終えるローカル作業が残っています: {', '.join(remaining)}")
+
+
 def reviewed_task(ledger: Path, root: Path, thread_id: str) -> Mapping[str, object]:
     try:
         document = strict_json(ledger.read_text(encoding="utf-8"))
@@ -37,6 +55,7 @@ def reviewed_task(ledger: Path, root: Path, thread_id: str) -> Mapping[str, obje
     reviews = [task for task in tasks if isinstance(task, dict) and task.get("id") == REVIEW_TASK_ID]
     if len(reviews) != 1:
         raise ReviewError("自己レビュー項目が一意ではありません")
+    require_completed_local_work(tasks)
     return reviews[0]
 
 
