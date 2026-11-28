@@ -23,11 +23,11 @@ def evaluate(expression: str, environment: dict[str, object]) -> bool:
         for part in path.split("."):
             if not isinstance(value, dict):
                 raise AssertionError(f"invalid workflow context path: {path}")
-            value = value[part]
+            value = value[part.replace("-", "_")]
         return repr(value)
 
     translated = re.sub(
-        r"\b(?:github|needs)(?:\.[A-Za-z_][A-Za-z0-9_]*)+\b",
+        r"\b(?:github|needs)(?:\.[A-Za-z_][A-Za-z0-9_-]*)+\b",
         lambda match: resolve(match.group()),
         expression,
     )
@@ -198,7 +198,8 @@ class DraftCiContractTest(unittest.TestCase):
             for action in ready_events
         ) + (
             (context("pull_request", head_repo="fork/repo"), False),
-            (context("pull_request", head_ref="feature/work"), False),
+            (context("pull_request", head_ref="release/ci-mixed"), True),
+            (context("pull_request", head_ref="release/ci-only", validation_scope="automation"), False),
             (context("pull_request", evidence_result="failure"), False),
             (context("pull_request", evidence_result="skipped"), False),
             (context("workflow_dispatch"), False),
@@ -211,6 +212,17 @@ class DraftCiContractTest(unittest.TestCase):
         preflight_mutant = self.preflight.replace(draft_guard, "")
         draft_event = context("pull_request", draft=True)
         self.assertTrue(evaluate(preflight_mutant, draft_event))
+
+    def test_nonversioned_full_pr_requires_unchanged_version_and_skips_packaging(self) -> None:
+        workflow = (ROOT / self.ci_path).read_text()
+        preflight = workflow[workflow.index("  preflight:\n") :]
+        self.assertIn("Verify unchanged version for non-release PR", preflight)
+        self.assertIn('test "$base_version" = "$head_version"', preflight)
+        self.assertIn(
+            "      - name: Release preflight checks\n"
+            "        if: startsWith(github.head_ref, 'release/v')",
+            preflight,
+        )
 
     def test_skipped_or_missing_ubuntu_job_cannot_satisfy_quality_evidence(self) -> None:
         skipped_job = {

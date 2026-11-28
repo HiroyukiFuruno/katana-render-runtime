@@ -777,14 +777,15 @@ jobs:
           if-no-files-found: warn
 
   preflight:
-    name: ${{ needs.validation_scope.outputs.scope == 'full' && startsWith(github.head_ref, 'release/v') && 'preflight' || 'Full preflight skipped' }}
+    name: ${{ needs.validation_scope.outputs.scope == 'full' && 'preflight' || 'Full preflight skipped' }}
     needs: [validation_scope, test, paired-performance]
     if: >-
+      needs.validation_scope.outputs.scope == 'full' &&
       needs.test.result == 'success' &&
+      needs.paired-performance.result == 'success' &&
       github.event_name == 'pull_request' &&
       github.event.pull_request.draft == false &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      startsWith(github.head_ref, 'release/v')
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
@@ -794,59 +795,86 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
+      - name: Verify unchanged version for non-release PR
+        if: "!startsWith(github.head_ref, 'release/v')"
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PR_HEAD_SHA"
+          git diff --check "$PR_BASE_SHA" "$PR_HEAD_SHA"
+          version() {
+            git show "$1:Cargo.toml" | python3 -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["workspace"]["package"]["version"])'
+          }
+          base_version="$(version "$PR_BASE_SHA")"
+          head_version="$(version "$PR_HEAD_SHA")"
+          test "$base_version" = "$head_version"
+
       - name: Install Java runtime
+        if: startsWith(github.head_ref, 'release/v')
         uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: "21"
 
       - name: Install Linux runtime test prerequisites
+        if: startsWith(github.head_ref, 'release/v')
         run: |
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk graphviz libfontconfig-dev libfreetype-dev
 
       - name: Install Rust
+        if: startsWith(github.head_ref, 'release/v')
         uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: "1.99.1"
           components: clippy, rustfmt, llvm-tools-preview
 
       - name: Cache cargo
+        if: startsWith(github.head_ref, 'release/v')
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: release-preflight-ubuntu-stable-all-features
 
       - name: Install Bun
+        if: startsWith(github.head_ref, 'release/v')
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
 
       - name: Install JavaScript dependencies
+        if: startsWith(github.head_ref, 'release/v')
         run: bun install --frozen-lockfile
 
       - name: Install Python analysis tools
+        if: startsWith(github.head_ref, 'release/v')
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.13.0"
           enable-cache: true
 
       - name: Install just
+        if: startsWith(github.head_ref, 'release/v')
         uses: taiki-e/install-action@4ccefd7d26b61bbb81f4ff01165e8a6880a1bd59 # just
 
       - name: Install capacity cleanup tool
+        if: startsWith(github.head_ref, 'release/v')
         run: cargo install cargo-sweep --version 0.8.0 --locked
 
       - name: Install cargo-llvm-cov
+        if: startsWith(github.head_ref, 'release/v')
         uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-llvm-cov@0.9.1
 
       - name: Install cargo-nextest
+        if: startsWith(github.head_ref, 'release/v')
         uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-nextest@0.9.148
 
       - name: Resolve version
+        if: startsWith(github.head_ref, 'release/v')
         id: version
         shell: bash
         run: |
@@ -854,7 +882,7 @@ jobs:
             "$GITHUB_EVENT_NAME" "" "$GITHUB_HEAD_REF"
 
       - name: Acquire completed producer from this CI generation
-        if: steps.version.outputs.version != 'v0.4.24'
+        if: startsWith(github.head_ref, 'release/v') && steps.version.outputs.version != 'v0.4.24'
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
@@ -862,6 +890,7 @@ jobs:
           python3 scripts/release/run_html_performance.py --bootstrap verify --acquire-current-producer
 
       - name: Release preflight checks
+        if: startsWith(github.head_ref, 'release/v')
         timeout-minutes: 45
         env:
           GH_TOKEN: ${{ github.token }}

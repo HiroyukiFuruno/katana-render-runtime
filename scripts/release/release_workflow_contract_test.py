@@ -839,7 +839,11 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
     def test_preflight_jobs_install_nextest_before_packaged_runtime_tests(self) -> None:
         integrated_preflight = self.ci.split("\n  preflight:\n", 1)[1]
         for workflow, verification, installation_condition in (
-            (integrated_preflight, "Release preflight checks", []),
+            (
+                integrated_preflight,
+                "Release preflight checks",
+                ["        if: startsWith(github.head_ref, 'release/v')"],
+            ),
             (
                 self.preflight,
                 "Release check",
