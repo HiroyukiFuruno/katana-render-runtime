@@ -89,7 +89,7 @@ unicode-script = "0.5"
 unicode-vo = "0.1"
 xmlwriter = "0.1"
 zune-jpeg = "0.5.15"
-skrifa = "^0.49"
+skrifa = "^0.50"
 log = "0.4"
 rustybuzz = { workspace = true }
 harfrust = { workspace = true }
@@ -123,7 +123,7 @@ nix = { version = "0.32.0", default-features = false, features = ["resource"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'.dependencies]
 # 公開済みCPU SDKの最小構成に合わせ、ローカルSkia改変や独自SDKへ依存しない。
-skia-safe = { version = "=0.156.0", default-features = false, features = ["binary-cache", "pdf"] }
+skia-safe = { version = "=0.158.0", default-features = false, features = ["binary-cache", "pdf"] }
 
 [target.'cfg(windows)'.dependencies]
 fontique = { version = "=0.13.0", default-features = false, features = ["system"] }
@@ -151,7 +151,7 @@ brotli-decompressor = { workspace = true }
 [dev-dependencies]
 env_logger = { version = "=0.11.12", default-features = false }
 imageproc = { version = "0.27.0", default-features = false }
-rstest = { version = "0.28.0", default-features = false }
+rstest = { version = "0.29.0", default-features = false }
 tempfile = { workspace = true }
 xml = "=1.4.0"
 
