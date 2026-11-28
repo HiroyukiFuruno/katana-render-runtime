@@ -35,6 +35,19 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             encoding="utf-8"
         )
 
+    def test_full_ci_has_no_master_push_trigger(self) -> None:
+        triggers = self.ci.split("\non:\n", 1)[1].split("\nconcurrency:", 1)[0]
+        self.assertNotIn("\n  push:", "\n" + triggers)
+        self.assertIn("\n  pull_request:", "\n" + triggers)
+
+    def test_merged_release_publishes_without_repeating_preflight(self) -> None:
+        triggers = self.release.split("\non:\n", 1)[1].split("\nconcurrency:", 1)[0]
+        self.assertIn("\n  pull_request:\n    types: [closed]", "\n" + triggers)
+        self.assertNotIn("workflow_run", self.release)
+        self.assertIn("github.event.pull_request.merged == true", self.release)
+        self.assertNotIn("release-verify", self.release)
+        self.assertNotIn("html-performance-evidence-acquire", self.release)
+
     def test_linux_native_and_publication_jobs_install_font_link_dependencies(self) -> None:
         workflows = (
             ("ci", self.ci, 2),
@@ -287,6 +300,8 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             'else just "$recipe"; fi',
         )
 
+        head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+        environment = dict(os.environ, GITHUB_HEAD_REF="master", PR_HEAD_SHA=head)
         selection = subprocess.run(
             [
                 "python3",
@@ -295,6 +310,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                 "recipe",
             ],
             cwd=root,
+            env=environment,
             capture_output=True,
             text=True,
             check=True,
@@ -331,6 +347,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                     "html-release-fidelity-check",
                 ],
                 cwd=temporary_directory,
+                env=environment,
                 capture_output=True,
                 text=True,
             )
@@ -765,42 +782,28 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             script_lines.append(line)
         return textwrap.dedent("\n".join(script_lines))
 
-    def test_release_checks_install_the_bun_resolver_before_freshness_validation(
-        self,
-    ) -> None:
-        for job in (
-            self.release[
-                self.release.index("  release-context:") : self.release.index(
-                    "  release:\n"
-                )
-            ],
-            self.release[self.release.index("  release:\n") :],
-        ):
-            self.assertIn("uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6", job)
-            self.assertIn("bun-version: 1.4.4", job)
-            self.assertIn("run: bun install --frozen-lockfile", job)
+    def test_preflight_installs_bun_before_performance_evidence(self) -> None:
+        self.assertIn(
+            "uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
+            self.preflight,
+        )
+        self.assertIn("bun-version: 1.4.4", self.preflight)
+        self.assertIn("run: bun install --frozen-lockfile", self.preflight)
+        self.assertLess(
+            self.preflight.index("run: bun install --frozen-lockfile"),
+            self.preflight.index("Acquire completed exact-source CI and paired performance evidence"),
+        )
 
-    def test_performance_retry_uses_pinned_uv_in_release_source(self) -> None:
-        self.assertIn(
-            "uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2",
-            self.retry,
-        )
-        self.assertIn('version: "0.13.0"', self.retry)
-        self.assertIn(
-            "python3 release-tools/scripts/release/run_html_performance.py --bootstrap verify",
-            self.retry,
-        )
-        self.assertIn('--repo "$GITHUB_WORKSPACE/release-source"', self.retry)
-        self.assertIn(
-            '--evidence-dir "$GITHUB_WORKSPACE/release-source/tmp/html-performance-release-evidence"',
-            self.retry,
-        )
-        self.assertNotIn("release-source/scripts/release/html-performance-requirements.lock", self.retry)
-        self.assertNotIn("python release-source/scripts/release/run_html_performance.py", self.retry)
+    def test_post_merge_release_has_no_performance_or_actions_api_validation(self) -> None:
+        for workflow in (self.release, self.retry):
+            self.assertNotIn("run_html_performance.py", workflow)
+            self.assertNotIn("html-performance-evidence-acquire", workflow)
+            self.assertNotIn("actions/workflows", workflow)
+        self.assertNotIn("verify_completed_release_context.py", self.retry)
+        self.assertIn("--publication-target --head", self.release)
 
     def test_release_performance_jobs_install_pinned_uv_before_wrapper_recipes(self) -> None:
-        release_job = self.release[self.release.index("  release:\n") :]
-        for label, workflow in (("release", release_job), ("preflight", self.preflight)):
+        for label, workflow in (("preflight", self.preflight),):
             with self.subTest(workflow=label):
                 self.assertIn(
                     "uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2",
@@ -819,16 +822,6 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         target = justfile.index("python3 scripts/release/verify-release-target.py")
         self.assertLess(freshness, target)
         freshness_steps = (
-            (
-                self.release,
-                "Release target check",
-                'run: just VERSION="${{ steps.version.outputs.version }}" release-target-check',
-            ),
-            (
-                self.release,
-                "Verify release package",
-                'run: just VERSION="${{ needs.release-context.outputs.version }}" release-verify',
-            ),
             (
                 self.preflight,
                 "Release check",
@@ -850,13 +843,16 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
     def test_preflight_jobs_install_nextest_before_packaged_runtime_tests(self) -> None:
         integrated_preflight = self.ci.split("\n  preflight:\n", 1)[1]
         for workflow, verification, installation_condition in (
-            (integrated_preflight, "Release preflight checks", []),
+            (
+                integrated_preflight,
+                "Release preflight checks",
+                ["        if: startsWith(github.head_ref, 'release/v')"],
+            ),
             (
                 self.preflight,
                 "Release check",
                 ["        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')"],
             ),
-            (self.release, "Verify release package", []),
         ):
             with self.subTest(verification=verification):
                 installation = self.workflow_step(workflow, "Install cargo-nextest")
@@ -885,10 +881,8 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         cleanup = self.release.index("- name: Cleanup published release state")
         self.assertLess(publish, public)
         self.assertLess(public, cleanup)
-        conditional = (
-            "if: github.event_name == 'workflow_run' || inputs.publish_crates == true"
-        )
-        self.assertGreaterEqual(self.release.count(conditional), 3)
+        conditional = "if: github.event_name == 'pull_request' || inputs.publish_crates == true"
+        self.assertEqual(self.release.count(conditional), 3)
         self.assertIn("while IFS= read -r package; do", self.publisher)
         self.assertIn(
             'publish_if_needed "${package}"\n  wait_for_crate "${package}"',
@@ -963,11 +957,16 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             self.assertIn(f"verify-crate-size.sh {package}", release_verify)
         self.assertNotIn("publish -p", release_verify)
 
-    def test_post_merge_release_check_allows_only_a_published_package_prefix(
-        self,
-    ) -> None:
-        target_check = self.workflow_step(self.release, "Release target check")
-        self.assertIn('ALLOW_PUBLISHED_PREFIX: "true"', target_check)
+    def test_post_merge_release_publishes_in_tag_package_and_release_order(self) -> None:
+        tag = self.release.index("- name: Create release tag")
+        package = self.release.index("- name: Publish crates.io")
+        public = self.release.index("- name: Publish complete GitHub Release")
+        cleanup = self.release.index("- name: Cleanup published release state")
+        self.assertLess(tag, package)
+        self.assertLess(package, public)
+        self.assertLess(public, cleanup)
+        self.assertNotIn("Release target check", self.release)
+        self.assertNotIn("Verify release package", self.release)
         self.assertIn(
             'bash scripts/release/assert-crates-not-published.sh "{{VERSION}}"',
             self.justfile,
@@ -1050,88 +1049,23 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             strict = run([packages[0]], allow_prefix=False)
             self.assertNotEqual(strict.returncode, 0)
             self.assertIn("already published", strict.stderr)
-            for package in packages:
-                with self.subTest(registry_failure=package):
-                    registry_error = run([], registry_failure=[package])
+            for registry_package in packages:
+                with self.subTest(registry_failure=registry_package):
+                    registry_error = run([], registry_failure=[registry_package])
                     self.assertNotEqual(registry_error.returncode, 0)
                     self.assertIn("Could not determine", registry_error.stderr)
 
-    def test_release_package_verification_propagates_prefix_mode_to_nested_target_check(
-        self,
-    ) -> None:
-        package_verification = self.workflow_step(
-            self.release, "Verify release package"
-        )
-        self.assertIn('ALLOW_PUBLISHED_PREFIX: "true"', package_verification)
-        self.assertIn(
-            'run: just VERSION="${{ needs.release-context.outputs.version }}" release-verify',
-            package_verification,
-        )
+    def test_preflight_keeps_strict_unpublished_package_gate(self) -> None:
         self.assertRegex(
             self.justfile,
             r"(?m)^release-verify: release-target-check html-performance-publication-check$",
         )
-
         for workflow, name in (
             (self.preflight, "Release check"),
             (self.ci, "Release preflight checks"),
         ):
             premerge_step = self.workflow_step(workflow, name)
             self.assertNotIn("ALLOW_PUBLISHED_PREFIX", premerge_step)
-
-        # 配布検証の依存recipeでも再試行モードが伝わり、既定の未公開要求が残ることを確認する。
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            scripts = root / "scripts/release"
-            scripts.mkdir(parents=True)
-            guard = Path(__file__).parent / "assert-crates-not-published.sh"
-            (scripts / guard.name).write_bytes(guard.read_bytes())
-            (scripts / "verify-version.sh").write_text(
-                '#!/usr/bin/env bash\necho "version_bare=${1#v}"\n',
-                encoding="utf-8",
-            )
-            cargo_bin = root / "bin"
-            cargo_bin.mkdir()
-            cargo = cargo_bin / "cargo"
-            cargo.write_text(
-                "#!/usr/bin/env python3\n"
-                "import sys\n"
-                "package = sys.argv[2].split('@')[0]\n"
-                "if package == 'katana-render-runtime-assets': sys.exit(0)\n"
-                "print('error: could not find package in registry', file=sys.stderr); sys.exit(101)\n",
-                encoding="utf-8",
-            )
-            cargo.chmod(0o755)
-            justfile = root / "Justfile"
-            justfile.write_text(
-                "release-verify: release-target-check\n\n"
-                "release-target-check:\n"
-                "\tbash scripts/release/assert-crates-not-published.sh v0.4.23\n",
-                encoding="utf-8",
-            )
-            environment = os.environ.copy()
-            environment["PATH"] = f"{cargo_bin}:{environment['PATH']}"
-            environment["ALLOW_PUBLISHED_PREFIX"] = "true"
-            nested_retry = subprocess.run(
-                ["just", "--justfile", str(justfile), "release-verify"],
-                cwd=root,
-                env=environment,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(nested_retry.returncode, 0, nested_retry.stderr)
-            environment.pop("ALLOW_PUBLISHED_PREFIX")
-            nested_strict = subprocess.run(
-                ["just", "--justfile", str(justfile), "release-verify"],
-                cwd=root,
-                env=environment,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertNotEqual(nested_strict.returncode, 0)
-            self.assertIn("already published", nested_strict.stderr)
 
     def test_internal_dependency_check_rejects_package_version_drift(self) -> None:
         script = Path(__file__).parent / "verify-internal-dependencies.sh"

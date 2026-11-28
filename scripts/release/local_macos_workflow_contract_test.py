@@ -352,15 +352,17 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
     def test_source_quality_is_required_before_native_checks_and_independent_of_mac_proof(self) -> None:
         static_job = workflow_job(self.workflow, "static-quality")
         self.assertIn("    runs-on: ubuntu-latest\n", static_job)
-        self.assertNotIn("    needs:", static_job)
+        self.assertIn("    needs: validation_scope\n", static_job)
         self.assertNotIn("continue-on-error:", static_job)
         self.assertNotIn("mac_proof", static_job)
         ready_condition = (
-            "github.event_name != 'pull_request' || github.event.pull_request.draft == false"
+            "needs.validation_scope.outputs.scope == 'full' && "
+            "((github.event_name == 'pull_request' && github.event.pull_request.draft == false) || "
+            "(github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/master'))"
         )
         self.assertEqual(workflow_job_condition(static_job), ready_condition)
         self.assertEqual(workflow_job_condition(self.test_job), ready_condition)
-        self.assertIn("    needs: static-quality\n", self.test_job)
+        self.assertIn("    needs: [validation_scope, static-quality]\n", self.test_job)
         self.assertNotIn("continue-on-error:", self.test_job.split("    steps:\n", 1)[0])
 
         static_steps = workflow_steps(static_job)
@@ -396,22 +398,33 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
                     self.assertTrue(
                         eval_step_if(step.get("if", "true"), "mac-arm64", "macos-latest", outcome, reuse)
                     )
-        for event, draft, expected in (
-            ("pull_request", True, False),
-            ("pull_request", False, True),
-            ("push", True, True),
-            ("workflow_dispatch", True, True),
+        for event, draft, ref, expected in (
+            ("pull_request", True, "refs/pull/123/merge", False),
+            ("pull_request", False, "refs/pull/123/merge", True),
+            ("push", True, "refs/heads/master", False),
+            ("workflow_dispatch", True, "refs/heads/master", False),
+            ("workflow_dispatch", True, "refs/heads/release/ci-evidence-reuse", True),
         ):
-            with self.subTest(event=event, draft=draft):
+            with self.subTest(event=event, draft=draft, ref=ref):
                 environment: dict[str, object] = {
-                    "github": {"event_name": event, "event": {"pull_request": {"draft": draft}}}
+                    "github": {
+                        "event_name": event,
+                        "ref": ref,
+                        "event": {"pull_request": {"draft": draft}},
+                    },
+                    "needs": {"validation_scope": {"outputs": {"scope": "full"}}},
                 }
                 self.assertEqual(evaluate(workflow_job_condition(static_job), environment), expected)
                 self.assertEqual(evaluate(workflow_job_condition(self.test_job), environment), expected)
 
     def test_source_quality_bypass_changes_fail_closed_for_mac_reuse(self) -> None:
         changes = (
-            ("    needs: static-quality\n", "    needs: []\n"),
+            ("    needs: validation_scope\n", "    needs: []\n"),
+            ("    needs: [validation_scope, static-quality]\n", "    needs: [static-quality]\n"),
+            (
+                "      needs.validation_scope.outputs.scope == 'full' &&\n",
+                "      true &&\n",
+            ),
             (
                 "      - name: Run independent source checks\n",
                 "      - name: Run independent source checks\n"
@@ -422,8 +435,8 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
                 "      - name: Run independent source checks\n        continue-on-error: true\n",
             ),
             (
-                "  test:\n    name: Test and Build (${{ matrix.check_name }})\n    needs: static-quality\n    if: >-\n",
-                "  test:\n    name: Test and Build (${{ matrix.check_name }})\n    needs: static-quality\n    if: >-\n      always() &&\n",
+                "  test:\n    name: ${{ needs.validation_scope.outputs.scope == 'full' && format('Test and Build ({0})', matrix.check_name) || format('Full checks skipped ({0})', matrix.check_name) }}\n    needs: [validation_scope, static-quality]\n    if: >-\n",
+                "  test:\n    name: ${{ needs.validation_scope.outputs.scope == 'full' && format('Test and Build ({0})', matrix.check_name) || format('Full checks skipped ({0})', matrix.check_name) }}\n    needs: [validation_scope, static-quality]\n    if: >-\n      always() &&\n",
             ),
         )
         with tempfile.TemporaryDirectory() as directory:
@@ -447,6 +460,7 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
             "b7226b9b6c7cc4d5b7e4e43d198fd934fff68e165d4f148202f9d1ba86ded672",
             "bfc837380ceca4025bf9f8e4c6fec7e666a74c25c8c242755de949dbc1d0718b",
             "eeb6ee4a7b8941b543715f07596c47f0bee8563d25450ef640176390fbad8502",
+            "c3899cef46f58b9478e84f88c21686f5ba0e7488381ed6b7fb7e78ef224bdeb8",
         )
         current_hash = EVIDENCE.workflow_digest(CI_PATH)
         self.assertTrue(EVIDENCE.workflow_scope_supported(CI_PATH))
@@ -526,7 +540,7 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
             "- os: windows-latest\n            platform: win64\n            check_name: windows-latest, win64",
         ):
             self.assertIn(entry, self.workflow)
-        self.assertIn("    name: Test and Build (${{ matrix.check_name }})\n", self.test_job)
+        self.assertIn("format('Test and Build ({0})', matrix.check_name)", self.test_job)
         graphviz = next(
             step for step in self.steps
             if step.get("name") == "Install Graphviz for PlantUML on macOS"
@@ -536,12 +550,12 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
             "matrix.platform == 'mac-arm64' && (steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')",
         )
         self.assertIn("github.event.pull_request.draft == false", self.test_job)
-        self.assertIn("    needs: static-quality\n", self.test_job)
+        self.assertIn("    needs: [validation_scope, static-quality]\n", self.test_job)
         paired_job = workflow_job(self.workflow, "paired-performance")
-        self.assertIn("needs: test", paired_job)
+        self.assertIn("needs: [validation_scope, test]", paired_job)
         preflight_job = workflow_job(self.workflow, "preflight")
-        self.assertIn("needs: [test, paired-performance]", preflight_job)
-        self.assertIn("needs.test.result == 'success'", preflight_job)
+        self.assertIn("needs: [validation_scope, test, paired-performance]", preflight_job)
+        self.assertIn('test "$TEST_RESULT" = success && test "$PERFORMANCE_RESULT" = success', preflight_job)
         self.assertIn("github.event.pull_request.draft == false", preflight_job)
         self.assertNotIn("SKIP", self.workflow)
 

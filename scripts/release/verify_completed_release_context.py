@@ -157,6 +157,18 @@ def _merged_release_pr(fetch: Fetch, base: str, repository: str, head: str, pull
     return pull, branch, match
 
 
+def verify_publication_target(fetch: Fetch, repository: str, head: str, expected_pr: int | None = None) -> JsonObject:
+    require(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is not None, "invalid repository")
+    require(SHA.fullmatch(head) is not None, "invalid source SHA")
+    base = f"repos/{repository}"
+    pull, branch, match = _merged_release_pr(fetch, base, repository, head)
+    require(expected_pr is None or pull.get("number") == expected_pr, "release PR differs from the merge event")
+    commit = json_object(fetch(f"{base}/git/commits/{head}"), "merge commit/tree identity mismatch")
+    tree = string_field(object_field(commit, "tree", "merge commit/tree identity mismatch"), "sha", "merge commit/tree identity mismatch")
+    require(commit.get("sha") == head and SHA.fullmatch(tree) is not None, "merge commit/tree identity mismatch")
+    return {"eligible": "true", "sha": head, "tree": tree, "version": match[1], "release_branch": branch}
+
+
 def verified_merged_pr_binding(fetch: Fetch, repository: str, head: str) -> tuple[int, str, str]:
     """Return the immutable base/head binding for a merged release PR after preflight."""
     require(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is not None, "invalid repository")
@@ -267,11 +279,21 @@ def main() -> int:
     parser.add_argument("--version", default="")
     parser.add_argument("--github-output", type=Path)
     parser.add_argument("--acquisition-receipt", type=Path)
+    parser.add_argument("--publication-target", action="store_true")
     args = parser.parse_args()
     try:
         event = json_object(json.loads(args.event.read_text()), "invalid event")
         trigger = event.get("workflow_run")
-        if trigger:
+        if args.publication_target:
+            require(args.acquisition_receipt is None, "publication target does not accept test evidence")
+            pull_request = event.get("pull_request")
+            expected_pr = None
+            if pull_request is not None:
+                pull = json_object(pull_request, "invalid release merge event")
+                require(event.get("action") == "closed" and pull.get("merged") is True and pull.get("merge_commit_sha") == args.head, "invalid release merge event")
+                expected_pr = positive_integer(pull.get("number"), "invalid release merge event PR")
+            context = verify_publication_target(api, args.repository, args.head, expected_pr)
+        elif trigger:
             trigger_object = json_object(trigger, "foreign workflow_run source")
             trigger_repository = object_field(trigger_object, "head_repository", "foreign workflow_run source")
             require(trigger_repository.get("full_name") == args.repository, "foreign workflow_run source")

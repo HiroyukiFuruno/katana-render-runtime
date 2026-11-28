@@ -177,8 +177,8 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
         steps = {step.get("name"): step for step in workflow_steps(paired)}
         self.assertEqual(steps["Verify optional local HTML performance evidence"].get("continue-on-error"), "true")
         self.assertEqual(steps["Verify optional local HTML performance evidence"].get("if"),
-                         "github.event_name == 'pull_request' || github.ref == 'refs/heads/master'")
-        self.assertIn('--verify-merged-head "$GITHUB_SHA"', paired)
+                         "github.event_name == 'pull_request'")
+        self.assertNotIn('--verify-merged-head "$GITHUB_SHA"', paired)
         expected = "steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'"
         for name in ("Install Rust toolchain", "Capture all 84 HTML catalog conditions"):
             self.assertEqual(steps[name].get("if"), expected)
@@ -188,7 +188,7 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
             self.assertEqual(steps[name].get("if"), "steps.source.outputs.version != '0.4.24' && (" + expected + ")")
         self.assertEqual(steps["Verify all 84 HTML images and font identities for v0.4.24"].get("if"),
                          "steps.source.outputs.version == '0.4.24' && (" + expected + ")")
-        self.assertIn("needs: [test, paired-performance]", workflow_job(workflow, "preflight"))
+        self.assertIn("needs: [validation_scope, test, paired-performance]", workflow_job(workflow, "preflight"))
 
     def test_merged_proof_reuses_the_exact_binding_and_host_policy(self) -> None:
         base, head, merge = "b" * 40, "c" * 40, "d" * 40

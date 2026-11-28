@@ -25,7 +25,7 @@ env:
 jobs:
   preflight:
     name: preflight
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/master'
     runs-on: ubuntu-latest
     # 手動検証は既に完了したCIの証跡だけを使い、計測待機を行わない。
     timeout-minutes: 360
@@ -102,11 +102,11 @@ jobs:
         id: version
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
         shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           bash scripts/release/resolve-release-version.sh \
-            "${{ github.event_name }}" \
-            "${{ inputs.version }}" \
-            "${{ github.head_ref }}"
+            "$GITHUB_EVENT_NAME" "$REQUESTED_VERSION" "$GITHUB_HEAD_REF"
 
       - name: Acquire completed exact-source CI and paired performance evidence
         if: steps.version.outputs.version != '' && steps.version.outputs.version != 'v0.4.24'

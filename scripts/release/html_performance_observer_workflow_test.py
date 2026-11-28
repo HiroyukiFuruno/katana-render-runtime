@@ -8,7 +8,7 @@ from local_macos_workflow_contract_test import workflow_job, workflow_steps
 
 
 class ObserverWorkflowTest(unittest.TestCase):
-    def test_v0424_uses_local_visual_evidence_on_pr_and_master_only(self) -> None:
+    def test_v0424_uses_local_visual_evidence_on_pull_requests_only(self) -> None:
         root = Path(__file__).resolve().parents[2]
         workflow = (root / ".github/workflows/test-and-build.yml").read_text(encoding="utf8")
         job = workflow_job(workflow, "paired-performance")
@@ -16,7 +16,7 @@ class ObserverWorkflowTest(unittest.TestCase):
         proof = steps["Verify optional local HTML performance evidence"]
         self.assertEqual(
             proof.get("if"),
-            "github.event_name == 'pull_request' || github.ref == 'refs/heads/master'",
+            "github.event_name == 'pull_request'",
         )
         proof_text = job.split("      - name: Verify optional local HTML performance evidence\n", 1)[1].split(
             "\n      - name:", 1
@@ -24,7 +24,7 @@ class ObserverWorkflowTest(unittest.TestCase):
         self.assertIn('if [[ "${{ steps.source.outputs.version }}" == \'0.4.24\' ]]; then', proof_text)
         self.assertIn("evidence_args+=(--visual)", proof_text)
         self.assertIn('"${evidence_args[@]}" --verify --pr', proof_text)
-        self.assertIn('"${evidence_args[@]}" --verify-merged-head "$GITHUB_SHA"', proof_text)
+        self.assertNotIn('"${evidence_args[@]}" --verify-merged-head "$GITHUB_SHA"', proof_text)
         fallback = steps["Capture all 84 HTML catalog conditions"]["if"]
         self.assertEqual(
             steps["Verify all 84 HTML images and font identities for v0.4.24"]["if"],
@@ -76,13 +76,13 @@ class ObserverWorkflowTest(unittest.TestCase):
         self.assertIn('${{ steps.font_observer.outputs.executable }}', capture_text)
         self.assertIn("031c93c5e822ffd8d22121bb41ed139fb6fcc4e96f6aa1f43ea31ec36fb9242c true", capture_text)
         self.assertIn("runs-on: macos-latest", job)
-        self.assertIn("needs: test", job)
+        self.assertIn("needs: [validation_scope, test]", job)
         self.assertIn("actions: read", job)
         self.assertIn("contents: read", job)
         self.assertNotIn("contents: write", job)
         self.assertIn("attestations: write", job)
         self.assertIn("id-token: write", job)
-        self.assertIn("needs: [test, paired-performance]", workflow_job(workflow, "preflight"))
+        self.assertIn("needs: [validation_scope, test, paired-performance]", workflow_job(workflow, "preflight"))
 
 
 if __name__ == "__main__":

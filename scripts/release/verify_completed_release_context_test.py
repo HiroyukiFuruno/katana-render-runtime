@@ -206,6 +206,40 @@ class CompletedReleaseContextTest(unittest.TestCase):
             },
         )
 
+    def test_publication_target_binds_exact_merged_version_without_actions_api(self) -> None:
+        requested: list[str] = []
+
+        def fetch(path: str) -> object:
+            requested.append(path)
+            return self.fetch(path)
+
+        self.assertEqual(
+            gate.verify_publication_target(fetch, REPO, HEAD, expected_pr=7),
+            {
+                "eligible": "true",
+                "sha": HEAD,
+                "tree": TREE,
+                "version": "v0.4.24",
+                "release_branch": "release/v0.4.24",
+            },
+        )
+        self.assertTrue(requested)
+        self.assertTrue(all("/actions/" not in path for path in requested))
+
+    def test_publication_target_rejects_wrong_repository_pr_and_commit(self) -> None:
+        object_at(self.pull, "head")["repo"] = {"full_name": "fork/repository"}
+        with self.assertRaisesRegex(ValueError, "repository/base"):
+            gate.verify_publication_target(self.fetch, REPO, HEAD)
+        object_at(self.pull, "head")["repo"] = {"full_name": REPO}
+        with self.assertRaisesRegex(ValueError, "release PR differs"):
+            gate.verify_publication_target(self.fetch, REPO, HEAD, expected_pr=8)
+
+        commit = self.response_object(f"{BASE}/git/commits/{HEAD}")
+        commit["sha"] = PR_HEAD
+        with self.assertRaisesRegex(ValueError, "merge commit/tree"):
+            gate.verify_publication_target(self.fetch, REPO, HEAD)
+        commit["sha"] = HEAD
+
     def test_verified_merged_pr_binding_returns_parent_identity_after_preflight(self) -> None:
         self.assertEqual(self.binding(), (7, BASE_SHA, PR_HEAD))
 
@@ -534,31 +568,19 @@ class ReleaseCompletionRoutingTest(unittest.TestCase):
             self.root / ".github/workflows/release-publish-retry.yml"
         ).read_text()
 
-    def test_public_release_is_ci_completion_driven_and_merge_sha_bound(self) -> None:
+    def test_public_release_is_merge_event_driven_and_merge_sha_bound(self) -> None:
+        self.assertIn("  pull_request:\n    types: [closed]", self.release)
+        self.assertNotIn("workflow_run", self.release)
         self.assertIn(
-            "workflow_run:\n    workflows: [CI]\n    types: [completed]", self.release
-        )
-        self.assertNotIn("  pull_request:", self.release)
-        self.assertIn(
-            "github.event.workflow_run.head_repository.full_name == github.repository",
+            "github.event.pull_request.head.repo.full_name == github.repository",
             self.release,
         )
-        self.assertIn(
-            "if: needs.release-context.outputs.eligible == 'true'", self.release
-        )
+        self.assertIn("--publication-target --head", self.release)
         self.assertIn("ref: ${{ needs.release-context.outputs.sha }}", self.release)
-        self.assertLess(
-            self.release.index("Verify completed merged release context"),
-            self.release.index("Checkout verified merge source"),
-        )
-        self.assertLess(
-            self.release.index("Reverify completed release identity"),
-            self.release.index("Create release tag"),
-        )
 
     def test_pr_preflight_is_same_ci_dependency_without_duplicate_context(self) -> None:
         self.assertIn(
-            "  preflight:\n    name: preflight\n    needs: [test, paired-performance]",
+            "    needs: [validation_scope, test, paired-performance]",
             self.ci,
         )
         self.assertIn("--acquire-current-producer", self.ci)
@@ -575,43 +597,27 @@ class ReleaseCompletionRoutingTest(unittest.TestCase):
         for text in (justfile, self.release, self.preflight, self.retry):
             self.assertNotIn("--wait-for-ci", text)
             self.assertNotIn("--acquire-current-producer", text)
-        self.assertIn("verify_completed_release_context.py", self.retry)
-        self.assertIn(
-            '--head "$(git --no-replace-objects -C release-source rev-parse HEAD)"',
-            self.retry,
-        )
-        self.assertIn("--acquire", self.retry)
+        self.assertNotIn("verify_completed_release_context.py", self.retry)
+        self.assertNotIn("run_html_performance.py", self.retry)
+        self.assertIn("Verify immutable release source", self.retry)
 
-    def test_both_publication_routes_bind_receipt_after_acquisition(self) -> None:
-        for workflow, reverify, acquire, publish in (
-            (
-                self.release,
-                "Reverify completed release identity before publication",
-                "Acquire completed exact-source paired performance evidence",
-                "Create release tag",
-            ),
-            (
-                self.retry,
-                "Reverify acquired completed generation before retry publication",
-                "Acquire completed exact-tag CI and paired performance evidence",
-                "Publish crates.io from release tag",
-            ),
+    def test_both_publication_routes_preserve_tag_package_publish_order(self) -> None:
+        for workflow, tag, publish in (
+            (self.release, "Create release tag", "Publish crates.io"),
+            (self.retry, "Verify immutable release source", "Publish crates.io from release tag"),
         ):
             with self.subTest(publication=publish):
-                self.assertLess(workflow.index(acquire), workflow.index(reverify))
-                self.assertLess(workflow.index(reverify), workflow.index(publish))
-                step = workflow[
-                    workflow.index("      - name: " + reverify) : workflow.index(
-                        "      - name: " + publish
-                    )
-                ]
-                self.assertIn("--acquisition-receipt ", step)
+                self.assertLess(workflow.index(tag), workflow.index(publish))
+                public = workflow.index("Publish complete GitHub Release")
+                cleanup = workflow.index("Cleanup published release state")
+                self.assertLess(workflow.index(publish), public)
+                self.assertLess(public, cleanup)
 
     def test_retry_context_reads_pull_requests_with_explicit_permission(self) -> None:
         permissions = self.retry[
             self.retry.index("permissions:") : self.retry.index("\nenv:")
         ]
-        self.assertIn("  actions: read\n", permissions)
+        self.assertNotIn("  actions: read\n", permissions)
         self.assertIn("  contents: write\n", permissions)
         self.assertIn("  pull-requests: read\n", permissions)
 

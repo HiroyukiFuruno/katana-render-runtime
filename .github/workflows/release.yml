@@ -1,9 +1,8 @@
 name: Release
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  pull_request:
+    types: [closed]
     branches: [master]
   workflow_dispatch:
     inputs:
@@ -22,10 +21,8 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  actions: read
-  contents: write
+  contents: read
   pull-requests: read
-  checks: read
 
 env:
   CARGO_INCREMENTAL: 0
@@ -35,16 +32,10 @@ jobs:
   release-context:
     if: >-
       github.event_name == 'workflow_dispatch' || (
-        github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.event == 'push' &&
-        github.event.workflow_run.head_branch == 'master' &&
-        github.event.workflow_run.head_repository.full_name == github.repository
+        github.event.pull_request.merged == true &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        startsWith(github.event.pull_request.head.ref, 'release/v')
       )
-    permissions:
-      actions: read
-      contents: read
-      pull-requests: read
-      checks: read
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -54,50 +45,27 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: master
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
           fetch-depth: 0
 
-      - name: Verify completed merged release context
+      - name: Resolve merged publication target
         id: version
         env:
           GH_TOKEN: ${{ github.token }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
           REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           python3 scripts/release/verify_completed_release_context.py \
+            --publication-target --head "${MERGE_SHA}" \
             --version "${REQUESTED_VERSION}" --github-output "${GITHUB_OUTPUT}"
-
-      - name: Checkout verified merge source
-        if: steps.version.outputs.eligible == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ steps.version.outputs.sha }}
-          fetch-depth: 0
-
-      - name: Install just
-        if: steps.version.outputs.eligible == 'true'
-        uses: taiki-e/install-action@4ccefd7d26b61bbb81f4ff01165e8a6880a1bd59 # just
-
-      - name: Install Bun
-        if: steps.version.outputs.eligible == 'true'
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.4.4
-
-      - name: Install JavaScript dependencies
-        if: steps.version.outputs.eligible == 'true'
-        run: bun install --frozen-lockfile
-
-      - name: Release target check
-        if: steps.version.outputs.eligible == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ALLOW_PUBLISHED_PREFIX: "true"
-        run: just VERSION="${{ steps.version.outputs.version }}" release-target-check
 
   release:
     needs: release-context
     if: needs.release-context.outputs.eligible == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -120,55 +88,6 @@ jobs:
         with:
           shared-key: release-ubuntu-stable-publish
 
-      - name: Install just
-        uses: taiki-e/install-action@4ccefd7d26b61bbb81f4ff01165e8a6880a1bd59 # just
-
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
-        with:
-          tool: cargo-nextest@0.9.148
-
-      - name: Install Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.4.4
-
-      - name: Install JavaScript dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Install Python analysis tools
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          version: "0.13.0"
-          enable-cache: true
-
-      - name: Acquire completed exact-source paired performance evidence
-        if: needs.release-context.outputs.version != 'v0.4.24'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: just html-performance-evidence-acquire
-
-      - name: Verify release package
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ALLOW_PUBLISHED_PREFIX: "true"
-        run: just VERSION="${{ needs.release-context.outputs.version }}" release-verify
-
-      - name: Reverify completed release identity before publication
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EXPECTED_SHA: ${{ needs.release-context.outputs.sha }}
-          REQUESTED_VERSION: ${{ needs.release-context.outputs.version }}
-        run: |
-          test "$(git --no-replace-objects rev-parse HEAD)" = "${EXPECTED_SHA}"
-          receipt=()
-          if [[ "$REQUESTED_VERSION" != 'v0.4.24' ]]; then
-            receipt=(--acquisition-receipt tmp/html-performance-release-evidence/acquisition.json)
-          fi
-          python3 scripts/release/verify_completed_release_context.py \
-            --head "${EXPECTED_SHA}" --version "${REQUESTED_VERSION}" \
-            "${receipt[@]}"
-
       - name: Create release tag
         env:
           TAG: ${{ needs.release-context.outputs.version }}
@@ -190,7 +109,7 @@ jobs:
           fi
 
       - name: Publish crates.io
-        if: github.event_name == 'workflow_run' || inputs.publish_crates == true
+        if: github.event_name == 'pull_request' || inputs.publish_crates == true
         env:
           GH_TOKEN: ${{ github.token }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
@@ -198,14 +117,14 @@ jobs:
 
       # 一部公開失敗を再試行できるよう、registry確認完了後にGitHub Releaseを公開する。
       - name: Publish complete GitHub Release
-        if: github.event_name == 'workflow_run' || inputs.publish_crates == true
+        if: github.event_name == 'pull_request' || inputs.publish_crates == true
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release-context.outputs.version }}
         run: gh release edit "${TAG}" --draft=false --latest --verify-tag
 
       - name: Cleanup published release state
-        if: github.event_name == 'workflow_run' || inputs.publish_crates == true
+        if: github.event_name == 'pull_request' || inputs.publish_crates == true
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_BRANCH: ${{ needs.release-context.outputs.release_branch }}
