@@ -685,7 +685,11 @@ describe("fixed native artifact and Python collector bindings", () => {
       ],
       [
         "loop mutability",
-        (value: string) => value.replace("for (const recipe of [", "for (let recipe of ["),
+        (value: string) =>
+          value.replace(
+            'for (const recipe of [\n    "html-input-state-fidelity-check",',
+            'for (let recipe of [\n    "html-input-state-fidelity-check",',
+          ),
       ],
       [
         "capacity argument",
