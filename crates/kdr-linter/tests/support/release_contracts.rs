@@ -921,7 +921,7 @@ const AUTOMATION_DISCOVERY_COMMANDS: [(&str, &str); 5] = [
     ),
     (
         "automation-performance-bootstrap-test",
-        "python3 scripts/release/run_html_performance.py --bootstrap test",
+        "python3 scripts/release/run_html_performance.py --bootstrap test --reuse-release-tests",
     ),
     (
         "automation-quality-test",

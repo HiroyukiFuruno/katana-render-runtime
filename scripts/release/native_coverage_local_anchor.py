@@ -21,6 +21,7 @@ PRODUCERS = {
     "root-nextest-retry": "root-nextest-retry.json",
     "performance": "performance.json",
     "runtime-asset-script-other": "runtime-asset-script-other.json",
+    "automation-performance-bootstrap-test": "automation-performance-bootstrap-test.json",
     **{producer: f"{producer}.json" for producer in profiles.accepted_producers()},
 }
 SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -263,6 +264,7 @@ def begin_runtime_script(
     """Invalidate an old success without changing the already computed Moon key."""
     if producer not in {
         "runtime-asset-script-other",
+        "automation-performance-bootstrap-test",
         *profiles.accepted_producers(),
     }:
         raise ValueError("invalid runtime-script anchor producer")

@@ -1291,26 +1291,39 @@ function pythonStatic(context: ContractContext, name: string): void {
     add(context, "python-type-unregistered", name);
 }
 const HTML_PERFORMANCE_TEST_WRAPPER = "scripts/release/run_html_performance.py";
-const HTML_PERFORMANCE_TEST_WRAPPER_SHA256 =
-  "e09517bda6c9e238e161dc05c32469b6d15b83c7e95c788f58d3945a120d2954";
+const HTML_PERFORMANCE_TEST_SOURCES = {
+  [HTML_PERFORMANCE_TEST_WRAPPER]:
+    "8f48ccd810ae4bf429b0ec0e18aeb2fa7b6e6836afa3e5841cb6a82c3bcb9f9e",
+  "scripts/release/automation_release_test_cache.py":
+    "e9c407f71a378f7c6c7af201a8f8e185737317a41b2f24a457ca0fa052e5c950",
+  "scripts/release/automation_release_test_cases.py":
+    "4637fd72fb994db2edc04994362878f18455050db6cfca3c7f65616885ed98ae",
+  "scripts/release/automation_release_test_identity.py":
+    "de53f9380da33309b2345c7e4d54e65ed85de818ed58009cf1ea1a468c3ed9de",
+} as const;
 function pythonPerformanceTestSelection(
   context: ContractContext,
   words: string[],
   name: string,
 ): boolean {
-  if (!name.startsWith("scripts/release/") || !context.visible.has(HTML_PERFORMANCE_TEST_WRAPPER))
-    return false;
-  if (!context.tracked.has(HTML_PERFORMANCE_TEST_WRAPPER)) return false;
-  if (sha(context.read(HTML_PERFORMANCE_TEST_WRAPPER)) !== HTML_PERFORMANCE_TEST_WRAPPER_SHA256)
-    return false;
+  if (!name.startsWith("scripts/release/")) return false;
   const expected = [
     "{{HTML_PERFORMANCE_SCIPY_ENV}}",
     "python3",
     HTML_PERFORMANCE_TEST_WRAPPER,
     "--bootstrap",
     "test",
+    "--reuse-release-tests",
   ];
-  return words.join("\0") === expected.join("\0");
+  return (
+    words.join("\0") === expected.join("\0") &&
+    Object.entries(HTML_PERFORMANCE_TEST_SOURCES).every(
+      ([source, digest]) =>
+        context.visible.has(source) &&
+        context.tracked.has(source) &&
+        sha(context.read(source)) === digest,
+    )
+  );
 }
 function hasRuffConfiguration(root: string, name: string): boolean {
   if (name.endsWith("ruff.toml")) return true;

@@ -49,6 +49,7 @@ class NativeCoverageLocalAnchorTests(unittest.TestCase):
             "root-nextest-retry": "root-nextest-retry.json",
             "performance": "performance.json",
             "runtime-asset-script-other": "runtime-asset-script-other.json",
+            "automation-performance-bootstrap-test": "automation-performance-bootstrap-test.json",
             "runtime-unused-script-regression": "runtime-unused-script-regression.json",
             **{producer: f"{producer}.json" for producer in profiles.RUNTIME_SCRIPT_PROFILES},
             "runtime-quality-owned-source-inventory":

@@ -136,19 +136,30 @@ def _child_environment(identity: str) -> dict[str, str]:
     return environment
 
 
-def run_mode(mode: str, arguments: Sequence[str]) -> int:
+def run_mode(mode: str, arguments: Sequence[str], *, reuse_release_tests: bool = False) -> int:
     before = installed_identity(SCIPY_VERSION, NUMPY_VERSION)
     environment = _child_environment(before)
-    completed = subprocess.run(_command(mode, arguments), cwd=ROOT, env=environment, check=False)
+
+    def current_identity() -> str:
+        return installed_identity(SCIPY_VERSION, NUMPY_VERSION)
+
+    if reuse_release_tests:
+        from automation_release_test_cache import ensure
+        from automation_release_test_identity import input_digest
+
+        status = ensure(ROOT, sys.executable, environment,
+                        lambda: input_digest(ROOT, environment, current_identity()))
+    else:
+        status = subprocess.run(_command(mode, arguments), cwd=ROOT, env=environment, check=False).returncode
     try:
-        after = installed_identity(SCIPY_VERSION, NUMPY_VERSION)
+        after = current_identity()
     except Exception as error:
         print(f"HTML performance Python identity changed or became unavailable: {error}", file=sys.stderr)
-        return completed.returncode if completed.returncode != 0 else 1
+        return status if status != 0 else 1
     if after != before:
         print("HTML performance Python identity changed while the child process ran", file=sys.stderr)
-        return completed.returncode if completed.returncode != 0 else 1
-    return completed.returncode
+        return status if status != 0 else 1
+    return status
 
 
 def main() -> int:
@@ -164,11 +175,14 @@ def main() -> int:
     parser.add_argument("--capture-launch-environment", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--replay-launch-environment", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--replay-launch-environment-sha256", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--reuse-release-tests", action="store_true")
     parser.add_argument("mode", choices=("verify", "verify-portable", "produce", "reuse", "promote", "local-proof", "test"))
     args, arguments = parser.parse_known_args()
     if args.capture_launch_environment or args.replay_launch_environment or args.replay_launch_environment_sha256:
         parser.error("launch environment options require --bootstrap")
-    return run_mode(args.mode, arguments)
+    if args.reuse_release_tests and (args.mode != "test" or arguments):
+        parser.error("--reuse-release-tests requires the complete test suite")
+    return run_mode(args.mode, arguments, reuse_release_tests=args.reuse_release_tests)
 
 
 if __name__ == "__main__":

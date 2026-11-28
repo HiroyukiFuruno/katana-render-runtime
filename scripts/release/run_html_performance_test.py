@@ -156,6 +156,16 @@ class HtmlPerformanceRunnerTest(unittest.TestCase):
         with patch.object(runner, "installed_identity", side_effect=("before", "after")), patch.object(subprocess, "run", return_value=completed):
             self.assertEqual(runner.run_mode("test", ()), 37)
 
+    def test_fixed_test_mode_rechecks_installed_inputs_for_reuse(self) -> None:
+        with (
+            patch.object(runner, "installed_identity", side_effect=("before", "current", "before")),
+            patch("automation_release_test_cache.ensure") as ensure,
+            patch("automation_release_test_identity.input_digest", return_value="bound") as digest,
+        ):
+            ensure.side_effect = lambda _repo, _python, _env, identity: 0 if identity() == "bound" else 1
+            self.assertEqual(runner.run_mode("test", (), reuse_release_tests=True), 0)
+        digest.assert_called_once_with(runner.ROOT, ensure.call_args.args[2], "current")
+
     def test_identity_is_stable_when_inventory_order_changes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

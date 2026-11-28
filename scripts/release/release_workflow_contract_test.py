@@ -722,7 +722,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             ],
             "automation-performance-bootstrap-test": [
                 "{{HTML_PERFORMANCE_SCIPY_ENV}}", "python3",
-                "scripts/release/run_html_performance.py", "--bootstrap", "test",
+                "scripts/release/run_html_performance.py", "--bootstrap", "test", "--reuse-release-tests",
             ],
             "automation-quality-test": [
                 "python3", "-m", "unittest", "discover", "-s", "scripts/quality", "-p",

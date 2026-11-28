@@ -110,7 +110,7 @@ const recipeBodies: Record<string, string> = {
   "python-typecheck":
     "MYPYPATH={{HTML_PERFORMANCE_TYPING_PATH}} {{HTML_PERFORMANCE_SCIPY_ENV}} uvx --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} --from mypy==2.4.0 mypy --strict scripts",
   "automation-contract-test":
-    "{{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap test",
+    "{{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap test --reuse-release-tests",
   lint: rootLintRecipe,
   unit: "bun test --path-ignore-patterns 'tmp/**' ./scripts\npython3 -m unittest discover -s scripts -p '*_test.py'",
   "runtime-asset-script-test":
@@ -434,6 +434,9 @@ function writeCurrentMoonFixtureInputs(root: string): void {
     "scripts/release/native_coverage_result_cli.py",
     "scripts/release/native_coverage_local_aggregate.py",
     "scripts/release/run_html_performance.py",
+    "scripts/release/automation_release_test_cache.py",
+    "scripts/release/automation_release_test_cases.py",
+    "scripts/release/automation_release_test_identity.py",
   ])
     write(root, name, fs.readFileSync(path.join(actualRoot, name), "utf8"));
 }
@@ -3503,6 +3506,23 @@ test.each([
   const root = fixture();
   recipes(root, { unit: body });
   expect(codes(root)).toContain("unit-local-missing:scripts/tool_test.py");
+});
+test("release Python reuse requires the tracked suite runner and exact recipe", () => {
+  const root = fixture();
+  const unit = "scripts/release/cache_scope_test.py";
+  write(
+    root,
+    unit,
+    "import unittest\nclass TestScope(unittest.TestCase):\n    def test_scope(self):\n        self.assertTrue(True)\n",
+  );
+  recipes(root, {
+    unit: "bun test ./",
+    "check-standard": `${recipeBodies["check-standard"]}\njust automation-contract-test`,
+  });
+  track(root);
+  expect(codes(root)).not.toContain(`unit-local-missing:${unit}`);
+  write(root, "scripts/release/automation_release_test_cases.py", "raise SystemExit(0)\n");
+  expect(codes(root)).toContain(`unit-local-missing:${unit}`);
 });
 test.each(["tsc --noEmit --strict false", "tsc --noEmit scripts/tool.ts", "tsc --noEmit || true"])(
   "compiler command overrides cannot be hidden by showConfig: %s",
