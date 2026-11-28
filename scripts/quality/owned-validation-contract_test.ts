@@ -423,21 +423,22 @@ function writeRuntimeAssetUnitFixtures(root: string): void {
     fs.readFileSync(path.join(actualRoot, playwrightConfigHelperPath), "utf8"),
   );
 }
+const moonFixtureInputPaths = [
+  "scripts/quality/moon_cache_contract_test.py",
+  "scripts/quality/owned_python_owner_contract.py",
+  "tests/fixtures/quality-cache/moon-cache-subject.test.ts",
+  "tests/fixtures/quality-cache/moon-cache-subject.ts",
+  "moon.yml",
+  "scripts/release/native_coverage_result_cli.py",
+  "scripts/release/native_coverage_local_aggregate.py",
+  "scripts/release/run_html_performance.py",
+  "scripts/release/automation_release_test_cache.py",
+  "scripts/release/automation_release_test_cases.py",
+  "scripts/release/automation_release_test_identity.py",
+] as const;
 function writeCurrentMoonFixtureInputs(root: string): void {
   const actualRoot = path.resolve(import.meta.dir, "../..");
-  for (const name of [
-    "scripts/quality/moon_cache_contract_test.py",
-    "scripts/quality/owned_python_owner_contract.py",
-    "tests/fixtures/quality-cache/moon-cache-subject.test.ts",
-    "tests/fixtures/quality-cache/moon-cache-subject.ts",
-    "moon.yml",
-    "scripts/release/native_coverage_result_cli.py",
-    "scripts/release/native_coverage_local_aggregate.py",
-    "scripts/release/run_html_performance.py",
-    "scripts/release/automation_release_test_cache.py",
-    "scripts/release/automation_release_test_cases.py",
-    "scripts/release/automation_release_test_identity.py",
-  ])
+  for (const name of moonFixtureInputPaths)
     write(root, name, fs.readFileSync(path.join(actualRoot, name), "utf8"));
 }
 function writeSvgEngineProvenanceFixture(root: string): void {
@@ -1496,7 +1497,7 @@ test("fixture sources stay classified when its shell registration is unsupported
       runtimeUnitPaths.filter((name) => name.endsWith(".ts")).length +
       svgEngineProvenanceSources.length,
     javascript: 2 + runtimeUnitPaths.filter((name) => name.endsWith(".js")).length,
-    python: 8,
+    python: 3 + moonFixtureInputPaths.filter((name) => name.endsWith(".py")).length,
   });
   expect(report.units).toEqual({
     bun: [
