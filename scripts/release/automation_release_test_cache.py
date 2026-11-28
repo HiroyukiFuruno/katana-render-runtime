@@ -147,23 +147,36 @@ def ensure(
     interpreter: str,
     environment: dict[str, str],
     identity: Callable[[], str | None],
+    *,
+    verify_only: bool = False,
 ) -> int:
     """Return the fixed lane's exit code; reuse only same-input anchored results."""
     root = repo.resolve(strict=True)
     with _locks(root):
         before = identity()
         if before is None:
-            return _run_tests(root, environment)
-        epoch = anchor.prepare(root, PRODUCER, before)
+            return 2 if verify_only else _run_tests(root, environment)
+        if verify_only:
+            try:
+                epoch = anchor.read_epoch(root, PRODUCER, before)
+            except ValueError:
+                print("Release Python tests: cached inputs differ", file=sys.stderr)
+                return 2
+        else:
+            epoch = anchor.prepare(root, PRODUCER, before)
         if epoch is None:
-            return _run_tests(root, environment)
+            return 2 if verify_only else _run_tests(root, environment)
         report = _read_report(root)
         if report is not None and anchor.verify(root, PRODUCER, before, epoch, report):
             if identity() == before:
                 print("Release Python tests: reused verified successful result", file=sys.stderr)
                 return 0
-            anchor.invalidate(root, PRODUCER, before, epoch)
+            if not verify_only:
+                anchor.invalidate(root, PRODUCER, before, epoch)
             return 1
+        if verify_only:
+            print("Release Python tests: verified successful result unavailable", file=sys.stderr)
+            return 2
         if not anchor.begin_runtime_script(root, PRODUCER, before, epoch):
             raise AutomationReleaseTestCacheError("release unit-test anchor conflict")
         base = _private_result_base(root)

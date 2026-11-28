@@ -38,6 +38,15 @@ class AutomationReleaseTestIdentityTest(unittest.TestCase):
                 self.root, {**self.environment, "LD_PRELOAD": "/tmp/lib.so"}, self.installed
             ))
 
+    def test_derived_launch_digest_does_not_bind_excluded_execution_metadata(self) -> None:
+        first = {**self.environment, "CODEX_TOOL_CALL_ID": "first",
+                 identity.DERIVED_LAUNCH_ENVIRONMENT: "a" * 64}
+        second = {**self.environment, "CODEX_TOOL_CALL_ID": "second",
+                  identity.DERIVED_LAUNCH_ENVIRONMENT: "b" * 64}
+        self.assertEqual(identity._stable_environment(first), identity._stable_environment(second))
+        self.assertNotEqual(identity._stable_environment(first),
+                            identity._stable_environment({**second, "TZ": "UTC"}))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -21,6 +21,7 @@ from runtime_script_tool_fingerprint_inputs import OVERRIDES, _config_absence, _
 
 SHA256 = re.compile(r"[0-9a-f]{64}")
 RELEASE_TEST_PROGRAM = "scripts/release/automation_release_test_cases.py"
+DERIVED_LAUNCH_ENVIRONMENT = "KRR_HTML_PERFORMANCE_ENVIRONMENT_SHA256"
 EXTERNAL_TOOLS = ("bash", "bun", "cargo", "git", "just", "node", "python3", "rtk", "rustc", "rustup", "uv")
 EXTERNAL_GIT_CONTEXT = frozenset({
     "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
@@ -84,7 +85,8 @@ def _executable_sha256(name: str, environment: Mapping[str, str]) -> str | None:
 def _stable_environment(environment: Mapping[str, str]) -> dict[str, str] | None:
     values: dict[str, str] = {}
     for name, value in environment.items():
-        if name in NATIVE_VOLATILE_ENV:
+        # 元の環境を下で照合する。生の環境ハッシュを含めると、除外した実行メタデータが再びキーに入る。
+        if name == DERIVED_LAUNCH_ENVIRONMENT or name in NATIVE_VOLATILE_ENV:
             continue
         if value and (name in NATIVE_UNSUPPORTED_ENV or name in OVERRIDES or name in EXTERNAL_GIT_CONTEXT
                       or name.startswith(("LD_", "DYLD_"))

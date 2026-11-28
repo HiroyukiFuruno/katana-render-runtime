@@ -82,6 +82,11 @@ class AutomationReleaseTestCacheTest(unittest.TestCase):
             for _ in range(2):
                 self.assertEqual(cache.ensure(self.root, sys.executable, self.environment, lambda: self.identity), 0)
             run.assert_called_once()
+            self.assertEqual(cache.ensure(self.root, sys.executable, self.environment,
+                                          lambda: "c" * 64, verify_only=True), 2)
+            self.assertEqual(cache.ensure(self.root, sys.executable, self.environment,
+                                          lambda: self.identity, verify_only=True), 0)
+            run.assert_called_once()
             original = self.report.read_bytes()
             self.report.write_bytes(original.replace(b'"passed"', b"{}"))
             self.assertEqual(cache.ensure(self.root, sys.executable, self.environment, lambda: self.identity), 0)

@@ -136,7 +136,8 @@ def _child_environment(identity: str) -> dict[str, str]:
     return environment
 
 
-def run_mode(mode: str, arguments: Sequence[str], *, reuse_release_tests: bool = False) -> int:
+def run_mode(mode: str, arguments: Sequence[str], *, reuse_release_tests: bool = False,
+             verify_release_test_reuse: bool = False) -> int:
     before = installed_identity(SCIPY_VERSION, NUMPY_VERSION)
     environment = _child_environment(before)
 
@@ -148,7 +149,8 @@ def run_mode(mode: str, arguments: Sequence[str], *, reuse_release_tests: bool =
         from automation_release_test_identity import input_digest
 
         status = ensure(ROOT, sys.executable, environment,
-                        lambda: input_digest(ROOT, environment, current_identity()))
+                        lambda: input_digest(ROOT, environment, current_identity()),
+                        verify_only=verify_release_test_reuse)
     else:
         status = subprocess.run(_command(mode, arguments), cwd=ROOT, env=environment, check=False).returncode
     try:
@@ -175,15 +177,18 @@ def main() -> int:
     parser.add_argument("--capture-launch-environment", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--replay-launch-environment", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--replay-launch-environment-sha256", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--reuse-release-tests", action="store_true")
+    release_tests = parser.add_mutually_exclusive_group()
+    release_tests.add_argument("--reuse-release-tests", action="store_true")
+    release_tests.add_argument("--verify-release-test-reuse", action="store_true")
     parser.add_argument("mode", choices=("verify", "verify-portable", "produce", "reuse", "promote", "local-proof", "test"))
     args, arguments = parser.parse_known_args()
     if args.capture_launch_environment or args.replay_launch_environment or args.replay_launch_environment_sha256:
         parser.error("launch environment options require --bootstrap")
-    if args.reuse_release_tests:
+    if args.reuse_release_tests or args.verify_release_test_reuse:
         if args.mode != "test" or arguments:
-            parser.error("--reuse-release-tests requires the complete test suite")
-        return run_mode("test", (), reuse_release_tests=True)
+            parser.error("release test reuse requires the complete test suite")
+        return run_mode("test", (), reuse_release_tests=True,
+                        verify_release_test_reuse=args.verify_release_test_reuse)
     return run_mode(args.mode, arguments)
 
 

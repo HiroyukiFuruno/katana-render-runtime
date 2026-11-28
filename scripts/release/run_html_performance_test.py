@@ -162,9 +162,10 @@ class HtmlPerformanceRunnerTest(unittest.TestCase):
             patch("automation_release_test_cache.ensure") as ensure,
             patch("automation_release_test_identity.input_digest", return_value="bound") as digest,
         ):
-            ensure.side_effect = lambda _repo, _python, _env, identity: 0 if identity() == "bound" else 1
+            ensure.side_effect = lambda _repo, _python, _env, identity, **_kwargs: 0 if identity() == "bound" else 1
             self.assertEqual(runner.run_mode("test", (), reuse_release_tests=True), 0)
         digest.assert_called_once_with(runner.ROOT, ensure.call_args.args[2], "current")
+        self.assertEqual(ensure.call_args.kwargs, {"verify_only": False})
 
     def test_identity_is_stable_when_inventory_order_changes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
