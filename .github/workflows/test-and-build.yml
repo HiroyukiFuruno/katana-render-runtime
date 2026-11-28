@@ -1782,7 +1782,7 @@ jobs:
           echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
 
       - name: Summarize rejected scaler fields without font paths or data
-        if: failure() && steps.source.outputs.diagnostic == 'true'
+        if: ${{ !cancelled() && steps.source.outputs.diagnostic == 'true' }}
         shell: bash
         run: |
           python3 - "tmp/html-performance-stage90/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/captures" <<'PY'
@@ -1791,9 +1791,9 @@ jobs:
           import json, re, sys
 
           counts = Counter()
-          traces = sorted(Path(sys.argv[1]).glob("*.chrome.png.trace.json"))
+          traces = sorted(Path(sys.argv[1]).glob("*-chrome.png.trace.json"))
           if not traces:
-              traces = sorted(Path(sys.argv[1]).glob("*-chrome.png.trace.json"))
+              raise SystemExit("Selected condition did not retain a browser trace")
           for trace in traces:
               for event in json.loads(trace.read_text())["traceEvents"]:
                   if event.get("cat") != "katana.font-observer" or event.get("name") != "scaler-font":
