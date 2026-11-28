@@ -589,10 +589,14 @@ jobs:
     name: ${{ needs.validation_scope.outputs.scope == 'automation' && 'preflight' || 'Scoped preflight skipped' }}
     needs: [validation_scope, scoped-test]
     if: >-
-      needs.validation_scope.outputs.scope == 'automation' &&
-      needs.scoped-test.result == 'success'
+      always() && needs.validation_scope.outputs.scope == 'automation'
     runs-on: ubuntu-latest
     steps:
+      - name: Require scoped checks to succeed
+        env:
+          TEST_RESULT: ${{ needs.scoped-test.result }}
+        run: test "$TEST_RESULT" = success
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -784,15 +788,19 @@ jobs:
     name: ${{ needs.validation_scope.outputs.scope == 'full' && 'preflight' || 'Full preflight skipped' }}
     needs: [validation_scope, test, paired-performance]
     if: >-
-      needs.validation_scope.outputs.scope == 'full' &&
-      needs.test.result == 'success' &&
-      needs.paired-performance.result == 'success' &&
+      always() && needs.validation_scope.outputs.scope == 'full' &&
       github.event_name == 'pull_request' &&
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
+      - name: Require product and performance checks to succeed
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          PERFORMANCE_RESULT: ${{ needs.paired-performance.result }}
+        run: test "$TEST_RESULT" = success && test "$PERFORMANCE_RESULT" = success
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

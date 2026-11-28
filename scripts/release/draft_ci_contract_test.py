@@ -205,8 +205,8 @@ class DraftCiContractTest(unittest.TestCase):
             (context("pull_request", head_repo="fork/repo"), False),
             (context("pull_request", head_ref="release/ci-mixed"), True),
             (context("pull_request", head_ref="release/ci-only", validation_scope="automation"), False),
-            (context("pull_request", evidence_result="failure"), False),
-            (context("pull_request", evidence_result="skipped"), False),
+            (context("pull_request", evidence_result="failure"), True),
+            (context("pull_request", evidence_result="skipped"), True),
             (context("workflow_dispatch"), False),
         )
         for event, expected in release_cases:
@@ -217,6 +217,18 @@ class DraftCiContractTest(unittest.TestCase):
         preflight_mutant = self.preflight.replace(draft_guard, "")
         draft_event = context("pull_request", draft=True)
         self.assertTrue(evaluate(preflight_mutant, draft_event))
+
+    def test_preflight_rejects_non_success_results_before_checkout(self) -> None:
+        workflow = (ROOT / self.ci_path).read_text()
+        scoped = workflow.split("  scoped-preflight:\n", 1)[1].split("  paired-performance:\n", 1)[0]
+        full = workflow.split("\n  preflight:\n", 1)[1]
+        for job, command in (
+            (scoped, 'run: test "$TEST_RESULT" = success'),
+            (full, 'run: test "$TEST_RESULT" = success && test "$PERFORMANCE_RESULT" = success'),
+        ):
+            with self.subTest(command=command):
+                self.assertIn("always() &&", job)
+                self.assertLess(job.index(command), job.index("uses: actions/checkout@"))
 
     def test_nonversioned_full_pr_requires_unchanged_version_and_skips_packaging(self) -> None:
         workflow = (ROOT / self.ci_path).read_text()

@@ -555,7 +555,7 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
         self.assertIn("needs: [validation_scope, test]", paired_job)
         preflight_job = workflow_job(self.workflow, "preflight")
         self.assertIn("needs: [validation_scope, test, paired-performance]", preflight_job)
-        self.assertIn("needs.test.result == 'success'", preflight_job)
+        self.assertIn('test "$TEST_RESULT" = success && test "$PERFORMANCE_RESULT" = success', preflight_job)
         self.assertIn("github.event.pull_request.draft == false", preflight_job)
         self.assertNotIn("SKIP", self.workflow)
 
