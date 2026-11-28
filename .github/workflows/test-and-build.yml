@@ -22,11 +22,43 @@ env:
   TEST_THREADS: "1"
 
 jobs:
-  static-quality:
-    name: Source quality checks
+  validation_scope:
+    name: Validation scope
     if: >-
       (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
       (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/master')
+    runs-on: ubuntu-latest
+    outputs:
+      scope: ${{ steps.classify.outputs.scope }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Classify validation scope
+        id: classify
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          PR_HEAD_REF: ${{ github.head_ref }}
+        run: |
+          scope=full
+          if [[ "$EVENT_NAME" == 'pull_request' && "$PR_HEAD_REPOSITORY" == "$REPOSITORY" && "$PR_HEAD_REF" == release/ci-* ]]; then
+            scope="$(python3 scripts/hooks/validation_scope.py --base "$PR_BASE_SHA" --head "$PR_HEAD_SHA")"
+          fi
+          test "$scope" = automation || test "$scope" = full
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
+
+  static-quality:
+    name: ${{ needs.validation_scope.outputs.scope == 'full' && 'Source quality checks' || 'Full source checks skipped' }}
+    needs: validation_scope
+    if: >-
+      needs.validation_scope.outputs.scope == 'full' &&
+      ((github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+      (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/master'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -59,11 +91,12 @@ jobs:
         run: bun run moon --concurrency 3 exec krr:source-static --on-failure continue --no-actions
 
   test:
-    name: Test and Build (${{ matrix.check_name }})
-    needs: static-quality
+    name: ${{ needs.validation_scope.outputs.scope == 'full' && format('Test and Build ({0})', matrix.check_name) || format('Full checks skipped ({0})', matrix.check_name) }}
+    needs: [validation_scope, static-quality]
     if: >-
-      (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
-      (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/master')
+      needs.validation_scope.outputs.scope == 'full' &&
+      ((github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+      (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/master'))
     strategy:
       fail-fast: false
       matrix:
@@ -492,12 +525,91 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  scoped-static-quality:
+    name: ${{ needs.validation_scope.outputs.scope == 'automation' && 'Source quality checks' || 'Scoped source checks skipped' }}
+    needs: validation_scope
+    if: >-
+      needs.validation_scope.outputs.scope == 'automation'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Install Python analysis tools
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.0"
+          enable-cache: true
+      - name: Install just
+        uses: taiki-e/install-action@4ccefd7d26b61bbb81f4ff01165e8a6880a1bd59 # just
+      - name: Run scoped workflow contract validation
+        run: bash scripts/hooks/check_automation_changes.sh
+
+  scoped-test:
+    name: ${{ needs.validation_scope.outputs.scope == 'automation' && format('Test and Build ({0})', matrix.check_name) || format('Scoped checks skipped ({0})', matrix.check_name) }}
+    needs: [validation_scope, scoped-static-quality]
+    if: >-
+      needs.validation_scope.outputs.scope == 'automation'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            check_name: ubuntu-latest, linux64
+            python: python3
+          - os: macos-latest
+            check_name: mac-arm64
+            python: python3
+          - os: windows-latest
+            check_name: windows-latest, win64
+            python: python
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Verify scoped source identity and metadata
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PYTHON: ${{ matrix.python }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PR_HEAD_SHA"
+          test "$("$PYTHON" scripts/hooks/validation_scope.py --base "$PR_BASE_SHA" --head "$PR_HEAD_SHA")" = automation
+          git diff --check "$PR_BASE_SHA" "$PR_HEAD_SHA"
+
+  scoped-preflight:
+    name: ${{ needs.validation_scope.outputs.scope == 'automation' && 'preflight' || 'Scoped preflight skipped' }}
+    needs: [validation_scope, scoped-test]
+    if: >-
+      needs.validation_scope.outputs.scope == 'automation' &&
+      needs.scoped-test.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Verify scoped preflight source identity
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PR_HEAD_SHA"
+          test "$(python3 scripts/hooks/validation_scope.py --base "$PR_BASE_SHA" --head "$PR_HEAD_SHA")" = automation
+          git diff --check "$PR_BASE_SHA" "$PR_HEAD_SHA"
+
   paired-performance:
     name: Native paired HTML time and RSS nonregression
-    needs: test
+    needs: [validation_scope, test]
     if: >-
-      (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
-      (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/master')
+      needs.validation_scope.outputs.scope == 'full' &&
+      ((github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+      (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/master'))
     runs-on: macos-latest
     timeout-minutes: 360
     permissions:
@@ -665,8 +777,8 @@ jobs:
           if-no-files-found: warn
 
   preflight:
-    name: preflight
-    needs: [test, paired-performance]
+    name: ${{ needs.validation_scope.outputs.scope == 'full' && startsWith(github.head_ref, 'release/v') && 'preflight' || 'Full preflight skipped' }}
+    needs: [validation_scope, test, paired-performance]
     if: >-
       needs.test.result == 'success' &&
       github.event_name == 'pull_request' &&

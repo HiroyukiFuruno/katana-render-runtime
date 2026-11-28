@@ -79,6 +79,16 @@ else
   python3 scripts/hooks/verify_push_issue.py <"${updates}"
 fi
 python3 scripts/hooks/pre_push_head_guard.py "${reviewed_head}" <"${updates}"
-just check
+validation_scope=full
+branch="$(git branch --show-current)"
+if [[ "${REVIEW_REMOTE}" == origin && "${branch}" == release/ci-* ]]; then
+  base_sha="$(git ls-remote --exit-code origin refs/heads/master | cut -f1)"
+  validation_scope="$(python3 scripts/hooks/validation_scope.py --base "${base_sha}" --head "${reviewed_head}")"
+fi
+case "${validation_scope}" in
+  automation) python3 scripts/hooks/run_locked_command.py -- bash scripts/hooks/check_automation_changes.sh ;;
+  full) just check ;;
+  *) exit 1 ;;
+esac
 # 品質確認中にcheckoutが切り替わっていないことを確かめ、検証済みHEADとの対応を保つ。
 python3 scripts/hooks/pre_push_head_guard.py "${reviewed_head}" <"${updates}"

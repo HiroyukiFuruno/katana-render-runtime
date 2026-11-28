@@ -188,7 +188,7 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
             self.assertEqual(steps[name].get("if"), "steps.source.outputs.version != '0.4.24' && (" + expected + ")")
         self.assertEqual(steps["Verify all 84 HTML images and font identities for v0.4.24"].get("if"),
                          "steps.source.outputs.version == '0.4.24' && (" + expected + ")")
-        self.assertIn("needs: [test, paired-performance]", workflow_job(workflow, "preflight"))
+        self.assertIn("needs: [validation_scope, test, paired-performance]", workflow_job(workflow, "preflight"))
 
     def test_merged_proof_reuses_the_exact_binding_and_host_policy(self) -> None:
         base, head, merge = "b" * 40, "c" * 40, "d" * 40

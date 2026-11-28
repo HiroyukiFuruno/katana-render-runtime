@@ -580,7 +580,7 @@ class ReleaseCompletionRoutingTest(unittest.TestCase):
 
     def test_pr_preflight_is_same_ci_dependency_without_duplicate_context(self) -> None:
         self.assertIn(
-            "  preflight:\n    name: preflight\n    needs: [test, paired-performance]",
+            "    needs: [validation_scope, test, paired-performance]",
             self.ci,
         )
         self.assertIn("--acquire-current-producer", self.ci)

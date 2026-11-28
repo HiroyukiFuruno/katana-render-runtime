@@ -95,6 +95,7 @@ def context(
     head_ref: str = "release/v1.2.3",
     push_message: str = "fix: correction",
     evidence_result: str = "success",
+    validation_scope: str = "full",
     action: str = "opened",
     ref: str = "refs/heads/release/v1.2.3",
 ) -> dict[str, object]:
@@ -113,12 +114,18 @@ def context(
             "head_ref": head_ref,
             "ref": ref,
         },
-        "needs": {"test": {"result": evidence_result}, "paired_performance": {"result": evidence_result}},
+        "needs": {
+            "test": {"result": evidence_result},
+            "paired_performance": {"result": evidence_result},
+            "validation_scope": {"outputs": {"scope": validation_scope}},
+        },
     }
 
 
 class DraftCiContractTest(unittest.TestCase):
     ci_test: ClassVar[str]
+    scoped_ci_test: ClassVar[str]
+    scoped_static: ClassVar[str]
     preflight: ClassVar[str]
 
     ci_path = ".github/workflows/test-and-build.yml"
@@ -127,6 +134,8 @@ class DraftCiContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.ci_test = workflow_job_if(cls.ci_path, "test")
+        cls.scoped_ci_test = workflow_job_if(cls.ci_path, "scoped-test")
+        cls.scoped_static = workflow_job_if(cls.ci_path, "scoped-static-quality")
         cls.preflight = workflow_job_if(cls.ci_path, "preflight")
 
     def test_pull_request_triggers_cover_ready_and_manual_runs_skip_master(self) -> None:
@@ -137,29 +146,46 @@ class DraftCiContractTest(unittest.TestCase):
         self.assertNotIn("  pull_request:", (ROOT / self.preflight_path).read_text())
         self.assertIn("  workflow_dispatch:", (ROOT / self.preflight_path).read_text())
 
-    def test_ci_job_truth_table_preserves_draft_and_manual_behavior(self) -> None:
+    def test_ci_job_truth_table_routes_automation_only_to_substantive_scoped_checks(self) -> None:
         draft_events = ("opened", "synchronize", "converted_to_draft")
         ready_events = ("opened", "synchronize", "reopened", "ready_for_review")
         cases = tuple(
-            (context("pull_request", draft=True, action=action), False)
+            (context("pull_request", draft=True, action=action), False, False)
             for action in draft_events
         ) + tuple(
-            (context("pull_request", draft=False, action=action), True)
+            (context("pull_request", draft=False, action=action), True, False)
             for action in ready_events
         ) + (
-            (context("workflow_dispatch", ref="refs/heads/release/v1.2.3"), True),
-            (context("workflow_dispatch", ref="refs/heads/master"), False),
-            (context("push", ref="refs/heads/master"), False),
+            (context("workflow_dispatch", ref="refs/heads/release/v1.2.3"), True, False),
+            (context("workflow_dispatch", ref="refs/heads/master"), False, False),
+            (context("push", ref="refs/heads/master"), False, False),
+            (
+                context(
+                    "pull_request",
+                    head_ref="release/ci-evidence-reuse",
+                    validation_scope="automation",
+                ),
+                False,
+                True,
+            ),
         )
-        for event, expected in cases:
+        for event, full_expected, scoped_expected in cases:
             with self.subTest(event=event):
-                self.assertEqual(evaluate(self.ci_test, event), expected)
+                self.assertEqual(evaluate(self.ci_test, event), full_expected)
+                self.assertEqual(evaluate(self.scoped_ci_test, event), scoped_expected)
+                self.assertEqual(evaluate(self.scoped_static, event), scoped_expected)
 
-        mutant = self.ci_test.replace(
-            "github.event_name == 'pull_request' && github.event.pull_request.draft == false",
-            "github.event_name == 'pull_request'",
-        )
-        self.assertTrue(evaluate(mutant, context("pull_request", draft=True)))
+    def test_automation_scope_is_limited_to_same_repository_nonversioned_prs(self) -> None:
+        workflow = (ROOT / self.ci_path).read_text(encoding="utf-8")
+        scope = workflow[workflow.index("  validation_scope:") : workflow.index("\n  static-quality:")]
+        self.assertIn("github.event.pull_request.head.repo.full_name", scope)
+        self.assertIn('"$PR_HEAD_REF" == release/ci-*', scope)
+        self.assertIn("scripts/hooks/validation_scope.py --base", scope)
+        self.assertIn("test \"$scope\" = automation || test \"$scope\" = full", scope)
+        scoped = workflow[workflow.index("  scoped-static-quality:") : workflow.index("\n  paired-performance:")]
+        self.assertEqual(scoped.count("bash scripts/hooks/check_automation_changes.sh"), 1)
+        self.assertIn("ref: ${{ github.event.pull_request.head.sha }}", scoped)
+        self.assertEqual(scoped.count("git diff --check \"$PR_BASE_SHA\" \"$PR_HEAD_SHA\""), 2)
 
     def test_evidence_and_preflight_truth_table_gates_draft_and_release_eligibility(self) -> None:
         draft_events = ("opened", "synchronize", "converted_to_draft")

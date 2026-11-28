@@ -36,6 +36,8 @@ GitHub のブランチ保護（branch protection）では、少なくとも次�
 - `Test and Build (windows-latest, win64)`
 - `preflight`
 
+同一リポジトリの `release/ci-*` で公開・CIの運用ファイルだけを変更する場合、push前とReady PRではベースと候補の完全なコミットSHAから差分を判定し、公開・CIの契約検査を実行する。製品、依存、ビルド設定など許可リスト外の差分が一つでもあれば完全検査を実行する。バージョン付きのリリースPRは常に完全検査を実行する。
+
 macOSのCIではApple Siliconの `macos-latest` を使う。ローカルのmacOSがCIと同じメジャーか1つ先で、同じPR・ベース・候補コミットの証跡が検証を通過した場合、CIは該当するmacOS検査を省略できる。証跡が有効でない場合はCIで検査する。
 
 v0.4.24のHTMLでは、macOS 26のCIで固定Chromium観測器が描画済み書体のフェイスを特定できない場合がある。[同じ条件を使ったCI診断](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/46114338296) で、フォントファイルのSHA-256を取得した20件のうち4件で確認した。macOS 27のApple Siliconで全84条件の画像が90点以上かつ出力フォントが一致し、同じPR・ベース・候補に対応する有効な保守者証跡がある場合に限り、macOS 26のCIでその結果を使う。証跡の取得や照合に失敗した場合はCIで同じ84条件を実行する。この証跡は暫定版の描画・書体判定に使い、後続版の時間・メモリ測定には使わない。

@@ -1084,7 +1084,7 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
     def test_release_preflight_uses_evidence_then_release_only_target(self) -> None:
         ci_workflow = (self.ROOT / ".github/workflows/test-and-build.yml").read_text(encoding="utf-8")
         ci_preflight = ci_workflow[ci_workflow.index("  preflight:\n") :]
-        self.assertIn("needs: [test, paired-performance]", ci_preflight)
+        self.assertIn("needs: [validation_scope, test, paired-performance]", ci_preflight)
         self.assertIn("needs.test.result == 'success'", ci_preflight)
         self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", ci_preflight)
         self.assertIn("startsWith(github.head_ref, 'release/v')", ci_preflight)

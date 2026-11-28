@@ -76,13 +76,13 @@ class ObserverWorkflowTest(unittest.TestCase):
         self.assertIn('${{ steps.font_observer.outputs.executable }}', capture_text)
         self.assertIn("031c93c5e822ffd8d22121bb41ed139fb6fcc4e96f6aa1f43ea31ec36fb9242c true", capture_text)
         self.assertIn("runs-on: macos-latest", job)
-        self.assertIn("needs: test", job)
+        self.assertIn("needs: [validation_scope, test]", job)
         self.assertIn("actions: read", job)
         self.assertIn("contents: read", job)
         self.assertNotIn("contents: write", job)
         self.assertIn("attestations: write", job)
         self.assertIn("id-token: write", job)
-        self.assertIn("needs: [test, paired-performance]", workflow_job(workflow, "preflight"))
+        self.assertIn("needs: [validation_scope, test, paired-performance]", workflow_job(workflow, "preflight"))
 
 
 if __name__ == "__main__":
