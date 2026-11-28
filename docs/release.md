@@ -7,7 +7,7 @@
 `release/vX.Y.Z` ブランチから `master` へ取り込み依頼（Pull Request）を作る。
 その取り込み依頼（Pull Request）では通常の品質ゲート（quality gate）とリリース前検査を必須にする。
 PR 作成前には `lefthook run pre-pr` を実行し、対象版番号（version）より前の完了済み OpenSpec change が `openspec/changes/archive/` に移動済みであることを確認する。同じ版番号の change に downstream 公開後の作業が残る場合は、その change を release PR の archive 条件に含めない。
-取り込み（merge）後は自動実行基盤（GitHub Actions）がタグ（tag）、GitHub リリース（GitHub Release）、crates.io 公開を実行する。
+`master` は必須検査が成功したPRからのマージだけを受け付ける。マージ済みのリリースPRを起点に、GitHub Actionsがマージコミットへタグを付け、crates.ioとGitHub Releaseへ公開する。
 
 ## 公開候補のコードフリーズ
 
@@ -42,9 +42,9 @@ v0.4.24のHTMLでは、macOS 26のCIで固定Chromium観測器が描画済み書
 
 ## リリース前検査
 
-`release-preflight` は、同一リポジトリ内の `release/v...` ブランチから作成された取り込み依頼（Pull Request）では、`CI` が同じ repository / PR / base SHA / head SHA で生成した Ubuntu 品質証跡を検証してから、`just release-preflight-check` を実行する。検証対象は同一 workflow run attempt の Ubuntu job と必須 step であり、APIから証跡を二度取得して一致を確認する。実行中のCIは上限付きで待機する。証跡の欠落・重複・不一致・failure・再取得中の変化は失敗として扱い、古い成功runへフォールバックしない。
+同一リポジトリ内のリリースPRをReadyにすると、`CI` が3 OSの検査とHTML検証を実行する。同じ実行内の `preflight` が必要な性能証跡を確認し、`just release-preflight-check` で実際に梱包した配布物を検査する。GitHubのブランチ保護が、これらの必須検査の合格とマージ対象の一致を確認する。
 
-この経路では `check` と `coverage` を再実行せず、成功済みの同一HEAD CI証跡を再利用する。Ubuntu CI側で release 用の runtime asset script test、automation contract test、runtime package asset check を実行する。品質条件は維持し、行カバレッジ100%、未到達行0、描画スコア下限99を適用する。Ubuntu CIのcoverage工程には45分の上限があり、timeoutまたは失敗時にはディスク使用量・プロセス一覧・coverage summaryの診断を記録する。`workflow_dispatch` による手動実行は証跡再利用を行わず、従来どおり `just release-check` で完全な品質検査とリリース固有検査を実行する。
+Ubuntu CIはruntime asset script test、automation contract test、runtime package asset check、行カバレッジ100%・未到達行0を確認する。カバレッジの上限は45分で、失敗時はディスク使用量・プロセス一覧・集計の診断を記録する。手動の `release-preflight` はリリースブランチでのみ実行する。
 
 `just release-check` はローカルの完全検査である。PR経路の `just release-preflight-check` は、リリース固有検査を行う。いずれもrelease予定版番号（version）より前のOpenSpec changeがactive側に残っている場合は失敗する。リリース前検査の内容は次の通り。
 
@@ -106,16 +106,12 @@ SVGが同一なのにPNGの文字が変わる場合は、参照側のfont読み�
 
 ## 公開順序
 
-取り込み（merge）後の `Release` ワークフロー（workflow）は次の順で動く。
+マージ後の `Release` ワークフローは次の順で動く。
 
-1. `just release-target-check`
-2. `just release-verify`
-3. リリースタグ（release tag）作成
-4. GitHub リリース（GitHub Release）作成
-5. `katana-render-runtime` を crates.io に公開
-6. crates.io で `katana-render-runtime` が見えるまで待機
-7. `katana-render-runtime-cli` を crates.io に公開
-8. 公開済み GitHub Release を再確認し、clean・統合済み・未ロックの release branch / worktree だけを整理
+1. リリースPRのマージコミットと公開バージョンを確定する。
+2. そのコミットにタグを付け、GitHub Releaseを下書きとして用意する。
+3. `katana-render-runtime-assets`、`katana-render-runtime`、`katana-render-runtime-cli` を順に配布し、各バージョンがレジストリに反映されてから次に進む。
+4. GitHub Releaseを公開し、統合済みで作業中の差分やロックがないローカルのリリースブランチとworktreeを整理する。
 
 cleanup は `scripts/release/cleanup_release_state.py` が担当する。
 GitHub Release が未公開、対象 branch が未統合、worktree が dirty または locked、対象が default branch のいずれかなら削除せず失敗する。

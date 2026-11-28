@@ -96,6 +96,7 @@ def context(
     push_message: str = "fix: correction",
     evidence_result: str = "success",
     action: str = "opened",
+    ref: str = "refs/heads/release/v1.2.3",
 ) -> dict[str, object]:
     return {
         "github": {
@@ -110,6 +111,7 @@ def context(
             },
             "repository": repository,
             "head_ref": head_ref,
+            "ref": ref,
         },
         "needs": {"test": {"result": evidence_result}, "paired_performance": {"result": evidence_result}},
     }
@@ -127,12 +129,15 @@ class DraftCiContractTest(unittest.TestCase):
         cls.ci_test = workflow_job_if(cls.ci_path, "test")
         cls.preflight = workflow_job_if(cls.ci_path, "preflight")
 
-    def test_pull_request_triggers_cover_ready_and_head_updates(self) -> None:
+    def test_pull_request_triggers_cover_ready_and_manual_runs_skip_master(self) -> None:
         self.assertEqual(trigger_types(self.ci_path), PR_EVENTS)
+        workflow = (ROOT / self.ci_path).read_text(encoding="utf-8")
+        self.assertNotIn("  push:", workflow)
+        self.assertIn("  workflow_dispatch:", workflow)
         self.assertNotIn("  pull_request:", (ROOT / self.preflight_path).read_text())
         self.assertIn("  workflow_dispatch:", (ROOT / self.preflight_path).read_text())
 
-    def test_ci_job_truth_table_preserves_draft_and_push_behavior(self) -> None:
+    def test_ci_job_truth_table_preserves_draft_and_manual_behavior(self) -> None:
         draft_events = ("opened", "synchronize", "converted_to_draft")
         ready_events = ("opened", "synchronize", "reopened", "ready_for_review")
         cases = tuple(
@@ -142,17 +147,17 @@ class DraftCiContractTest(unittest.TestCase):
             (context("pull_request", draft=False, action=action), True)
             for action in ready_events
         ) + (
-            (context("push"), True),
-            (context("push", push_message="Merge pull request #12 from owner/topic"), True),
-            (context("push", push_message="fix: merged (#12)"), True),
+            (context("workflow_dispatch", ref="refs/heads/release/v1.2.3"), True),
+            (context("workflow_dispatch", ref="refs/heads/master"), False),
+            (context("push", ref="refs/heads/master"), False),
         )
         for event, expected in cases:
             with self.subTest(event=event):
                 self.assertEqual(evaluate(self.ci_test, event), expected)
 
         mutant = self.ci_test.replace(
-            "github.event_name != 'pull_request' || github.event.pull_request.draft == false",
-            "true",
+            "github.event_name == 'pull_request' && github.event.pull_request.draft == false",
+            "github.event_name == 'pull_request'",
         )
         self.assertTrue(evaluate(mutant, context("pull_request", draft=True)))
 

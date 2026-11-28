@@ -202,55 +202,26 @@ class NativeCoverageReuseTests(unittest.TestCase):
         result = self._invoke_seed_verification(key_path, status_path)
         self.assertEqual(result.returncode, 1)
 
-    def test_workflow_scopes_restore_sign_and_save_and_keeps_pr_fresh(self) -> None:
+    def test_workflow_runs_fresh_coverage_without_master_cache_signing(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         test_job_start = workflow.index("\n  test:")
-        signer_start = workflow.index("\n  sign-native-coverage-cache:")
         paired_start = workflow.index("\n  paired-performance:")
-        test_job = workflow[test_job_start:signer_start]
-        signer_job = workflow[signer_start:paired_start]
+        test_job = workflow[test_job_start:paired_start]
         self.assertIn("attestations: read", test_job)
         self.assertNotIn("attestations: write", test_job)
         self.assertNotIn("id-token: write", test_job)
-        self.assertIn("actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", workflow)
-        self.assertIn("actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", workflow)
-        self.assertIn("actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6", workflow)
-        self.assertIn("actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333", workflow)
-        self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/master'", test_job)
-        self.assertIn("github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'", test_job)
+        self.assertNotIn("sign-native-coverage-cache:", workflow)
+        self.assertNotIn("native-coverage-cache", test_job)
+        self.assertIn("github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/master'", test_job)
         self.assertIn("if: matrix.os == 'ubuntu-latest'", test_job)
         coverage_start = test_job.index("- name: Run coverage")
-        coverage_end = test_job.index("- name: Prepare fresh-only coverage attestation seed")
+        coverage_end = test_job.index("- name: Diagnose coverage failure")
         coverage_step = test_job[coverage_start:coverage_end]
         self.assertIn("id: coverage", coverage_step)
         self.assertIn("just coverage", coverage_step)
-        self.assertIn("cache_verify.outputs.verified", coverage_step)
-        cache_restore = test_job[test_job.index("- name: Restore exact trusted Linux coverage result"):
-                                 test_job.index("- name: Verify trusted Linux coverage result")]
-        cache_save = signer_job[signer_job.index("- name: Save immutable exact-key coverage result"):]
-        self.assertIn("path: tmp/quality/native-coverage-cache/manifest.json", cache_restore)
-        self.assertIn("path: tmp/quality/native-coverage-cache/manifest.json", cache_save)
-        self.assertIn("${{ steps.coverage.outcome }}", test_job)
-        self.assertIn("!= 'success'", test_job)
-        seed_step = test_job[test_job.index("- name: Prepare fresh-only coverage attestation seed"):
-                             test_job.index("- name: Upload sanitized coverage seed for master signing")]
-        self.assertIn("collect-context", seed_step)
-        self.assertIn("cmp -s", seed_step)
-        self.assertIn("--context \"$post_context\"", seed_step)
-        self.assertIn("continue-on-error: true\n        uses: actions/upload-artifact@", test_job)
-        restore_start = test_job.index("- name: Restore exact trusted Linux coverage result")
-        restore_end = test_job.index("- name: Verify trusted Linux coverage result")
-        self.assertNotIn("restore-keys:", test_job[restore_start:restore_end])
-        self.assertIn("actions: write", signer_job)
-        self.assertIn("id-token: write", signer_job)
-        self.assertIn("attestations: write", signer_job)
-        self.assertIn("artifact-metadata: write", signer_job)
-        self.assertIn("needs: [test, paired-performance]", signer_job)
-        self.assertIn("steps.native_coverage_seed_verify.outputs.eligible == 'true'", signer_job)
-        self.assertIn("id: native_coverage_attest", signer_job)
-        self.assertIn("steps.native_coverage_attest.outcome == 'success'", signer_job)
-        self.assertIn("continue-on-error: true\n        uses: actions/attest@", signer_job)
-        self.assertIn("continue-on-error: true\n        uses: actions/cache/save@", signer_job)
+        self.assertNotIn("cache_verify.outputs.verified", coverage_step)
+        self.assertNotIn("actions/cache/restore@", test_job)
+        self.assertNotIn("actions/cache/save@", test_job)
 
 
 if __name__ == "__main__":

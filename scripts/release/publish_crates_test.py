@@ -26,16 +26,16 @@ class PublishCratesTest(unittest.TestCase):
             "import os, pathlib, sys\n"
             "args = sys.argv[1:]\n"
             "expected = [\n"
+            "    '--publication-target',\n"
             "    '--repo', os.environ['RELEASE_REPO'],\n"
             "    '--head', os.environ['RELEASE_HEAD'],\n"
             "    '--version', os.environ['RELEASE_VERSION'],\n"
-            "    '--acquisition-receipt', os.environ['RELEASE_RECEIPT'],\n"
             "]\n"
             "with pathlib.Path(os.environ['CARGO_LOG']).open('a') as stream:\n"
             "    stream.write('verify\\n')\n"
             "if args != expected: raise SystemExit('release verifier argv differs')\n"
             "if os.environ.get('RELEASE_GATE_FAIL') == 'true':\n"
-            "    raise SystemExit('coverage does not satisfy 100/0')\n",
+            "    raise SystemExit('release target differs from merged source')\n",
             encoding="utf-8",
         )
         subprocess.run(["git", "init", "-q", str(self.source)], check=True)
@@ -46,9 +46,6 @@ class PublishCratesTest(unittest.TestCase):
             ["git", "-C", str(self.source), "config", "user.email", "fixture@example.invalid"],
             check=True,
         )
-        receipt = self.source / "tmp/html-performance-release-evidence/acquisition.json"
-        receipt.parent.mkdir(parents=True)
-        receipt.write_text("{}\n", encoding="utf-8")
         subprocess.run(["git", "-C", str(self.source), "add", "-A"], check=True)
         subprocess.run(["git", "-C", str(self.source), "commit", "-qm", "fixture base"], check=True)
         cargo_bin = self.root / "bin"
@@ -122,7 +119,6 @@ class PublishCratesTest(unittest.TestCase):
             capture_output=True,
             text=True,
         ).stdout.strip()
-        receipt = self.source / "tmp/html-performance-release-evidence/acquisition.json"
         environment = os.environ.copy()
         environment.update(
             {
@@ -135,7 +131,6 @@ class PublishCratesTest(unittest.TestCase):
                 "RELEASE_REPO": str(self.source),
                 "RELEASE_HEAD": head,
                 "RELEASE_VERSION": version,
-                "RELEASE_RECEIPT": str(receipt),
                 "RELEASE_GATE_FAIL": "true" if gate_failure else "false",
             }
         )
@@ -189,14 +184,14 @@ class PublishCratesTest(unittest.TestCase):
         self.assertEqual(self.published_packages(), [])
         self.assertNotIn("info", self.log.read_text(encoding="utf-8"))
 
-    def test_rejected_coverage_gate_prevents_all_cargo_attempts(self) -> None:
+    def test_rejected_publication_target_prevents_all_cargo_attempts(self) -> None:
         result = self.run_publisher(
             "0.4.23",
             ["katana-render-runtime-assets", "katana-render-runtime", "katana-render-runtime-cli"],
             gate_failure=True,
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("coverage does not satisfy 100/0", result.stderr)
+        self.assertIn("release target differs from merged source", result.stderr)
         self.assertEqual(self.log.read_text(encoding="utf-8").splitlines(), ["verify"])
         self.assertEqual(self.published_packages(), [])
 

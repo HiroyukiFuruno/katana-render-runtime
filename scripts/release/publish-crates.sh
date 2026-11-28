@@ -4,16 +4,11 @@ set -euo pipefail
 version="$(bash "$(dirname "$0")/verify-version.sh" "${1:-}" | awk -F= '$1 == "version_bare" { print $2 }')"
 repo_root="$(pwd -P)"
 head_sha="$(git --no-replace-objects -C "${repo_root}" rev-parse --verify HEAD)"
-python3 "${repo_root}/scripts/release/verify_completed_release_context.py" \
+python3 "$(dirname "$0")/verify_completed_release_context.py" \
+  --publication-target \
   --repo "${repo_root}" \
   --head "${head_sha}" \
-  --version "${version}" \
-  --acquisition-receipt "${repo_root}/tmp/html-performance-release-evidence/acquisition.json"
-
-if [[ -z "${CARGO_REGISTRY_TOKEN:-}" ]]; then
-  echo "CARGO_REGISTRY_TOKEN is required." >&2
-  exit 1
-fi
+  --version "${version}"
 
 publish_attempts="${PUBLISH_ATTEMPTS:-3}"
 publish_retry_delay_seconds="${PUBLISH_RETRY_DELAY_SECONDS:-10}"
@@ -74,7 +69,7 @@ publish_if_needed() {
       echo "${package} ${version} already published; skipping."
       return
     fi
-    if cargo publish -p "${package}" --locked --token "${CARGO_REGISTRY_TOKEN}"; then
+    if cargo publish -p "${package}" --locked; then
       return
     fi
     if [[ "${attempt}" == "${publish_attempts}" ]]; then

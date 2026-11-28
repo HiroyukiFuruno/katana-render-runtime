@@ -177,8 +177,8 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
         steps = {step.get("name"): step for step in workflow_steps(paired)}
         self.assertEqual(steps["Verify optional local HTML performance evidence"].get("continue-on-error"), "true")
         self.assertEqual(steps["Verify optional local HTML performance evidence"].get("if"),
-                         "github.event_name == 'pull_request' || github.ref == 'refs/heads/master'")
-        self.assertIn('--verify-merged-head "$GITHUB_SHA"', paired)
+                         "github.event_name == 'pull_request'")
+        self.assertNotIn('--verify-merged-head "$GITHUB_SHA"', paired)
         expected = "steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'"
         for name in ("Install Rust toolchain", "Capture all 84 HTML catalog conditions"):
             self.assertEqual(steps[name].get("if"), expected)
