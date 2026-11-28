@@ -300,6 +300,8 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             'else just "$recipe"; fi',
         )
 
+        head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+        environment = dict(os.environ, GITHUB_HEAD_REF="master", PR_HEAD_SHA=head)
         selection = subprocess.run(
             [
                 "python3",
@@ -308,6 +310,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                 "recipe",
             ],
             cwd=root,
+            env=environment,
             capture_output=True,
             text=True,
             check=True,
@@ -344,6 +347,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                     "html-release-fidelity-check",
                 ],
                 cwd=temporary_directory,
+                env=environment,
                 capture_output=True,
                 text=True,
             )
